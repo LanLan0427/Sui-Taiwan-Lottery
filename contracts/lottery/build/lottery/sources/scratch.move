@@ -209,4 +209,29 @@ module lottery::scratch {
         assert!(sui::tx_context::sender(ctx) == lottery.owner, E_NOT_OWNER);
         lottery.round = lottery.round + 1;
     }
+
+    /// 合約擁有者可以手動注入資金到獎金池 (Vault)
+    public fun top_up(
+        lottery: &mut ScratchLottery,
+        payment: Coin<SUI>,
+        _ctx: &mut TxContext,
+    ) {
+        balance::join(&mut lottery.vault, coin::into_balance(payment));
+    }
+
+    /// 合約擁有者可以提取獎金池中的資金 (例如回收盈餘)
+    public fun withdraw(
+        lottery: &mut ScratchLottery,
+        amount: u64,
+        ctx: &mut TxContext,
+    ) {
+        assert!(sui::tx_context::sender(ctx) == lottery.owner, E_NOT_OWNER);
+        assert!(balance::value(&lottery.vault) >= amount, E_INSUFFICIENT_VAULT);
+        
+        let withdrawn_coin = coin::from_balance(
+            balance::split(&mut lottery.vault, amount),
+            ctx
+        );
+        sui::transfer::public_transfer(withdrawn_coin, lottery.owner);
+    }
 }

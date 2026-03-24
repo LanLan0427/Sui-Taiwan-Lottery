@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit'
+import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
 import './App.css'
-import { getContractIds } from './utils/transactions'
+import { getContractIds, buildBuyScratchCardTx, buildSettleScratchTx, ticketIdToTier, buildOneStopInvoiceTx } from './utils/transactions'
 import { AnimatedNumber } from './AnimatedNumber'
 import { playCoinSound, playScratchSound, playWinSound } from './utils/audio'
+import { AdminPanel } from './AdminPanel'
 
 const SCRATCH_THRESHOLD_PERCENT = 56
 const SCRATCH_SAMPLE_STRIDE = 8
@@ -218,13 +219,7 @@ const ticketTypes: TicketType[] = [
   },
 ]
 
-function drawMultiplier(): number {
-  const roll = Math.random()
-  if (roll < 0.03) return 20
-  if (roll < 0.12) return 6
-  if (roll < 0.32) return 1.5
-  return 0
-}
+
 
 function randomInt(max: number): number {
   return Math.floor(Math.random() * max)
@@ -328,7 +323,8 @@ function buildBoardData(gameType: GameType, isWinner: boolean, payoutSui: number
 
 function App() {
   const account = useCurrentAccount()
-  const { isPending: isExecuting } = useSignAndExecuteTransaction()
+  const suiClient = useSuiClient()
+  const { mutateAsync: signAndExecute, isPending: isExecuting } = useSignAndExecuteTransaction()
   
   const [locale, setLocale] = useState<Locale>('zh')
   const [selectedTicket, setSelectedTicket] = useState<TicketId>('t500')
@@ -339,7 +335,12 @@ function App() {
   const [totalWonSui, setTotalWonSui] = useState(0)
   const [session, setSession] = useState<ScratchSession | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [scratchCardObjectId, setScratchCardObjectId] = useState<string | null>(null)
   const [scratchPercent, setScratchPercent] = useState(0)
+  const [walletBalance, setWalletBalance] = useState<number | null>(null)
+  const [isFaucetLoading, setIsFaucetLoading] = useState(false)
+  const [isAdminOpen, setIsAdminOpen] = useState(false)
+  const [lotteryOwner, setLotteryOwner] = useState<string | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const isScratchingRef = useRef(false)
@@ -349,6 +350,84 @@ function App() {
 
   const t = content[locale]
   const activeTicket = ticketTypes.find((item) => item.id === selectedTicket) ?? ticketTypes[1]
+
+  // 查詢錢包餘額
+  const refreshBalance = useCallback(async () => {
+    if (!account?.address) {
+      setWalletBalance(null)
+      return
+    }
+    try {
+      const balance = await suiClient.getBalance({ owner: account.address })
+      setWalletBalance(Number(balance.totalBalance) / 1_000_000_000)
+    } catch (err) {
+      console.error('Failed to fetch balance:', err)
+    }
+  }, [account?.address, suiClient])
+
+  const requestTestnetSui = useCallback(async () => {
+    if (!account?.address) return
+
+    const network = (import.meta.env.VITE_SUI_NETWORK || 'testnet').toLowerCase()
+    if (network !== 'testnet') {
+      window.alert(locale === 'zh' ? 'Faucet 目前只支援 Testnet，請先切換網路。' : 'Faucet is currently available for testnet only.')
+      return
+    }
+
+    setIsFaucetLoading(true)
+    try {
+      const response = await fetch('https://faucet.testnet.sui.io/v2/gas', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          FixedAmountRequest: {
+            recipient: account.address,
+          },
+        }),
+      })
+
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || `HTTP ${response.status}`)
+      }
+
+      window.alert(locale === 'zh' ? '已送出 Faucet 請求，請稍候幾秒後再查看餘額。' : 'Faucet request sent. Please wait a few seconds and check your balance.')
+      setTimeout(() => {
+        refreshBalance()
+      }, 2500)
+    } catch (error) {
+      console.error('Failed to request faucet:', error)
+      window.open('https://faucet.sui.io/', '_blank', 'noopener,noreferrer')
+      window.alert(locale === 'zh' ? '自動領取失敗，已開啟官方 Faucet 頁面。' : 'Auto faucet failed. Opened official faucet page.')
+    } finally {
+      setIsFaucetLoading(false)
+    }
+  }, [account?.address, locale, refreshBalance])
+
+  useEffect(() => {
+    refreshBalance()
+    // 每 15 秒自動刷新
+    const interval = setInterval(refreshBalance, 15000)
+    return () => clearInterval(interval)
+  }, [refreshBalance])
+
+  // 查詢合約擁有者
+  useEffect(() => {
+    const ids = getContractIds()
+    if (!ids.lotteryObject) return
+
+    suiClient.getObject({
+      id: ids.lotteryObject,
+      options: { showContent: true }
+    }).then(res => {
+      if (res.data?.content?.dataType === 'moveObject') {
+        const fields = res.data.content.fields as any
+        setLotteryOwner(fields.owner)
+      }
+    }).catch(err => console.error('Failed to fetch lottery owner:', err))
+  }, [suiClient])
   const filteredTickets = useMemo(() => {
     return ticketTypes.filter((item) => {
       const passKeyword =
@@ -543,33 +622,97 @@ function App() {
   const buyScratchCard = async (ticket: TicketType) => {
     setSelectedTicket(ticket.id)
     if (session && !session.isClaimed && isModalOpen) return
+    if (!account) return
 
-    const multiplier = drawMultiplier() * currentTier.multiplier
-    const payout = Number((ticket.priceSui * multiplier).toFixed(3))
-    const nextSession: ScratchSession = {
-      id: Date.now(),
-      boardData: buildBoardData(ticket.gameType, payout > 0, payout),
-      payoutSui: payout,
-      isFinished: false,
-      isClaimed: false,
-    }
+    const ids = getContractIds()
+    if (!ids.lottery || !ids.lotteryObject) return
 
-    setSession(nextSession)
-    setMyTickets((prev) => prev + 1)
-    setTotalSpentSui((prev) => Number((prev + ticket.priceSui).toFixed(3)))
-    playCoinSound()
-    setIsModalOpen(true)
+    // 先送出鏈上交易，確認付款後才開啟刮卡
+    try {
+      const tier = ticketIdToTier(ticket.id)
+      const currentTierIdx = tiers.indexOf(currentTier)
+      const tx = buildBuyScratchCardTx({
+        lotteryObjectId: ids.lotteryObject,
+        randomObjectId: ids.randomness,
+        ticketTier: tier,
+        playerTier: currentTierIdx >= 0 ? currentTierIdx : 0,
+        packageId: ids.lottery,
+      })
 
-    // Try on-chain transaction if contract is deployed
-    if (account) {
-      const ids = getContractIds()
-      if (ids.lottery && ids.lotteryObject) {
+      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      console.log('✅ buy_scratch_card TX digest:', result.digest)
+
+      // 等待交易確認並擷取新建的 ScratchCard object ID
+      const txResponse = await suiClient.waitForTransaction({
+        digest: result.digest,
+        options: { showObjectChanges: true },
+      })
+
+      const createdCard = txResponse.objectChanges?.find(
+        (change) => change.type === 'created' && change.objectType?.includes('::scratch::ScratchCard')
+      )
+      let realPayoutSui = 0
+      if (createdCard && 'objectId' in createdCard) {
+        setScratchCardObjectId(createdCard.objectId)
+        console.log('🎫 ScratchCard object ID:', createdCard.objectId)
+
+        // 🔍 從鏈上讀取真實的 ScratchCard 數據
         try {
-          console.log('Would call buy_scratch_card on testnet', { ids, ticket: ticket.id })
-        } catch (err) {
-          console.error(err)
+          const cardObj = await suiClient.getObject({
+            id: createdCard.objectId,
+            options: { showContent: true }
+          })
+          
+          if (cardObj.data?.content?.dataType === 'moveObject') {
+            const fields = cardObj.data.content.fields as any
+            const payoutMist = fields.result_payout || '0'
+            realPayoutSui = Number(payoutMist) / 1_000_000_000
+            console.log('💰 On-chain real payout (SUI):', realPayoutSui)
+          }
+        } catch (fetchErr) {
+          console.error('Failed to fetch card object details:', fetchErr)
+          // Fallback: 如果讀取失敗，先用 0 (避免誤判中獎而報錯)
+          realPayoutSui = 0
         }
       }
+
+      // ✅ 交易成功 → 使用「鏈上真實結果」產生刮卡、開啟 Modal
+      const nextSession: ScratchSession = {
+        id: Date.now(),
+        boardData: buildBoardData(ticket.gameType, realPayoutSui > 0, realPayoutSui),
+        payoutSui: realPayoutSui,
+        isFinished: false,
+        isClaimed: false,
+      }
+
+      setSession(nextSession)
+      setMyTickets((prev) => prev + 1)
+      setTotalSpentSui((prev) => Number((prev + ticket.priceSui).toFixed(3)))
+      playCoinSound()
+      setIsModalOpen(true)
+      refreshBalance()
+
+      // 🧾 同時開立鏈上發票 (onchain_invoice 加分項目)
+      if (ids.invoicePackage && ids.invoiceSystem && ids.invoiceUsdcTreasuryCap && ids.invoiceTaxTreasuryCap && ids.invoiceTreasury) {
+        try {
+          const invoiceTx = buildOneStopInvoiceTx({
+            usdcTreasuryCapId: ids.invoiceUsdcTreasuryCap,
+            taxTreasuryCapId: ids.invoiceTaxTreasuryCap,
+            treasuryId: ids.invoiceTreasury,
+            systemId: ids.invoiceSystem,
+            recipient: account.address,
+            usdcAmount: BigInt(1_000_000), // 1 USDC (6 decimals)
+            protocol: 'SUI-Taiwan-Lottery',
+            packageId: ids.invoicePackage,
+          })
+          const invoiceResult = await signAndExecute({ transaction: await invoiceTx.toJSON() })
+          console.log('🧾 Invoice TX digest:', invoiceResult.digest)
+        } catch (invoiceErr) {
+          console.warn('⚠️ Invoice creation failed (non-critical):', invoiceErr)
+        }
+      }
+    } catch (err) {
+      console.error('❌ buy_scratch_card failed:', err)
     }
   }
 
@@ -586,14 +729,22 @@ function App() {
     setTotalWonSui((prev) => Number((prev + session.payoutSui).toFixed(3)))
     playWinSound()
 
-    // Try on-chain settlement if contract is deployed
-    if (account) {
+    // 送出鏈上結算交易
+    if (account && scratchCardObjectId) {
       const ids = getContractIds()
       if (ids.lottery && ids.lotteryObject) {
         try {
-          console.log('Would call settle_scratch on testnet', { ids })
+          const tx = buildSettleScratchTx({
+            lotteryObjectId: ids.lotteryObject,
+            scratchCardObjectId: scratchCardObjectId,
+            packageId: ids.lottery,
+          })
+
+          const result = await signAndExecute({ transaction: await tx.toJSON() })
+          console.log('✅ settle_scratch TX digest:', result.digest)
+          refreshBalance()
         } catch (err) {
-          console.error(err)
+          console.error('❌ settle_scratch failed:', err)
         }
       }
     }
@@ -693,6 +844,28 @@ function App() {
               {t.langZh}
             </button>
           </div>
+          {account && walletBalance !== null && (
+            <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+              <div style={{background: 'rgba(255,255,255,0.15)', padding: '0.5rem 1rem', borderRadius: '8px', color: '#fff', fontSize: '0.9rem', fontWeight: 700}}>
+                💰 {walletBalance.toFixed(4)} SUI
+              </div>
+              <button
+                onClick={requestTestnetSui}
+                disabled={isFaucetLoading}
+                style={{background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 800, cursor: isFaucetLoading ? 'not-allowed' : 'pointer', opacity: isFaucetLoading ? 0.7 : 1}}
+              >
+                {isFaucetLoading ? (locale === 'zh' ? '⏳ 補幣中' : '⏳ Funding') : (locale === 'zh' ? '🚰 補測試幣' : '🚰 Faucet')}
+              </button>
+              {account?.address && lotteryOwner && account.address === lotteryOwner && (
+                <button 
+                  onClick={() => setIsAdminOpen(true)}
+                  style={{background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer'}}
+                >
+                  🛠️ {locale === 'zh' ? '管理' : 'Admin'}
+                </button>
+              )}
+            </div>
+          )}
           <ConnectButton />
         </div>
       </header>
@@ -929,6 +1102,14 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {isAdminOpen && (
+        <AdminPanel
+          locale={locale}
+          onClose={() => setIsAdminOpen(false)}
+          onBalanceChange={refreshBalance}
+        />
       )}
     </main>
   )

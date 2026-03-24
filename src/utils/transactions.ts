@@ -3,7 +3,6 @@ import { Transaction } from "@mysten/sui/transactions";
 export interface BuyScratchCardParams {
   lotteryObjectId: string;
   randomObjectId: string;
-  paymentCoinObjectId: string;
   ticketTier: number; // 0, 1, 2
   playerTier: number; // 0, 1, 2, 3
   packageId: string;
@@ -15,21 +14,49 @@ export interface SettleScratchParams {
   packageId: string;
 }
 
+export interface TopUpParams {
+  lotteryObjectId: string;
+  amount: bigint;
+  packageId: string;
+}
+
+/**
+ * 根據票券等級返回價格 (mist)
+ */
+function getPriceByTier(tier: number): bigint {
+  switch (tier) {
+    case 0:
+      return BigInt(20_000_000); // 0.02 SUI
+    case 1:
+      return BigInt(50_000_000); // 0.05 SUI
+    case 2:
+      return BigInt(100_000_000); // 0.1 SUI
+    default:
+      return BigInt(50_000_000);
+  }
+}
+
+/**
+ * 將 TicketId 轉為鏈上 tier 數字
+ */
+export function ticketIdToTier(id: string): number {
+  if (id === 't200') return 0;
+  if (id === 't500') return 1;
+  if (id === 't1000') return 2;
+  return 0;
+}
+
 /**
  * 構建購買刮卡交易
+ * 使用 tx.gas 自動從 gas coin 分幣支付，無需手動指定 coin object
  */
 export function buildBuyScratchCardTx(
   params: BuyScratchCardParams
 ): Transaction {
   const tx = new Transaction();
 
-  // 從錢包選取支付幣
-  const [coin] = tx.splitCoins(
-    tx.object(params.paymentCoinObjectId),
-    [
-      getPriceByTier(params.ticketTier)
-    ]
-  );
+  // 從 gas coin 分出所需金額
+  const [coin] = tx.splitCoins(tx.gas, [getPriceByTier(params.ticketTier)]);
 
   // 調用 Move 合約 buy_scratch_card
   tx.moveCall({
@@ -66,19 +93,49 @@ export function buildSettleScratchTx(
 }
 
 /**
- * 根據票券等級返回價格 (mist)
+ * 構建充值交易 (Admin Only)
  */
-function getPriceByTier(tier: number): bigint {
-  switch (tier) {
-    case 0:
-      return BigInt(20_000_000); // 0.02 SUI
-    case 1:
-      return BigInt(50_000_000); // 0.05 SUI
-    case 2:
-      return BigInt(100_000_000); // 0.1 SUI
-    default:
-      return BigInt(50_000_000);
-  }
+export function buildTopUpTx(
+  params: TopUpParams
+): Transaction {
+  const tx = new Transaction();
+
+  const [coin] = tx.splitCoins(tx.gas, [params.amount]);
+
+  tx.moveCall({
+    target: `${params.packageId}::scratch::top_up`,
+    arguments: [
+      tx.object(params.lotteryObjectId),
+      coin,
+    ],
+  });
+
+  return tx;
+}
+
+export interface WithdrawParams {
+  lotteryObjectId: string;
+  amount: bigint;
+  packageId: string;
+}
+
+/**
+ * 構建提取交易 (Admin Only)
+ */
+export function buildWithdrawTx(
+  params: WithdrawParams
+): Transaction {
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target: `${params.packageId}::scratch::withdraw`,
+    arguments: [
+      tx.object(params.lotteryObjectId),
+      tx.pure.u64(params.amount),
+    ],
+  });
+
+  return tx;
 }
 
 /**
@@ -90,5 +147,131 @@ export function getContractIds() {
     randomness: import.meta.env.VITE_SUI_RANDOM_PACKAGE_ID || "0x8",
     lottery: import.meta.env.VITE_LOTTERY_PACKAGE_ID,
     lotteryObject: import.meta.env.VITE_LOTTERY_OBJECT_ID,
+    // onchain_invoice
+    invoicePackage: import.meta.env.VITE_INVOICE_PACKAGE_ID,
+    invoiceSystem: import.meta.env.VITE_INVOICE_SYSTEM_ID,
+    invoiceTreasury: import.meta.env.VITE_INVOICE_TREASURY_ID,
+    invoiceUsdcTreasuryCap: import.meta.env.VITE_INVOICE_USDC_TREASURY_CAP_ID,
+    invoiceTaxTreasuryCap: import.meta.env.VITE_INVOICE_TAX_TREASURY_CAP_ID,
+    invoiceAdmin: import.meta.env.VITE_INVOICE_ADMIN_ID,
   };
 }
+
+// ============ onchain_invoice 串接 ============
+
+/**
+ * 領取測試用 USDC (faucet)
+ */
+export function buildFaucetUsdcTx(params: {
+  usdcTreasuryCapId: string;
+  amount: bigint;
+  recipient: string;
+  packageId: string;
+}): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${params.packageId}::usdc::faucet`,
+    arguments: [
+      tx.object(params.usdcTreasuryCapId),
+      tx.pure.u64(params.amount),
+      tx.pure.address(params.recipient),
+    ],
+  });
+  return tx;
+}
+
+/**
+ * 用 USDC 購買 TAX_COIN 額度
+ * 1 USDC -> 10 TAX_COIN
+ */
+export function buildBuyQuotaTx(params: {
+  usdcCoinObjectId: string;
+  taxTreasuryCapId: string;
+  treasuryId: string;
+  packageId: string;
+}): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${params.packageId}::tax_coin::buy_quota`,
+    arguments: [
+      tx.object(params.usdcCoinObjectId),
+      tx.object(params.taxTreasuryCapId),
+      tx.object(params.treasuryId),
+    ],
+  });
+  return tx;
+}
+
+/**
+ * 用 TAX_COIN 開立鏈上發票
+ */
+export function buildInitInvoiceTx(params: {
+  taxCoinObjectId: string;
+  systemId: string;
+  protocol: string;
+  clockId?: string;
+  packageId: string;
+}): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${params.packageId}::invoice::init_invoice`,
+    arguments: [
+      tx.object(params.taxCoinObjectId),
+      tx.object(params.systemId),
+      tx.pure.string(params.protocol),
+      tx.object(params.clockId || "0x6"), // sui::clock 的 shared object
+    ],
+  });
+  return tx;
+}
+
+/**
+ * 一站式：faucet USDC → buy_quota → init_invoice (PTB)
+ * 將三個步驟合併成一個 Programmable Transaction Block
+ */
+export function buildOneStopInvoiceTx(params: {
+  usdcTreasuryCapId: string;
+  taxTreasuryCapId: string;
+  treasuryId: string;
+  systemId: string;
+  recipient: string;
+  usdcAmount: bigint;
+  protocol: string;
+  packageId: string;
+}): Transaction {
+  const tx = new Transaction();
+
+  // Step 1: Faucet USDC
+  const [usdcCoin] = tx.moveCall({
+    target: `${params.packageId}::usdc::faucet`,
+    arguments: [
+      tx.object(params.usdcTreasuryCapId),
+      tx.pure.u64(params.usdcAmount),
+      tx.pure.address(params.recipient),
+    ],
+  });
+
+  // Step 2: Buy TAX_COIN quota with USDC
+  const [taxCoin] = tx.moveCall({
+    target: `${params.packageId}::tax_coin::buy_quota`,
+    arguments: [
+      usdcCoin,
+      tx.object(params.taxTreasuryCapId),
+      tx.object(params.treasuryId),
+    ],
+  });
+
+  // Step 3: Init Invoice with TAX_COIN
+  tx.moveCall({
+    target: `${params.packageId}::invoice::init_invoice`,
+    arguments: [
+      taxCoin,
+      tx.object(params.systemId),
+      tx.pure.string(params.protocol),
+      tx.object("0x6"), // Clock
+    ],
+  });
+
+  return tx;
+}
+

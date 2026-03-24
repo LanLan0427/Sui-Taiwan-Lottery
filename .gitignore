@@ -25,3 +25,6 @@ dist-ssr
 
 .env
 
+
+.sui_tx*.json
+contracts/onchain_invoice_repo/
