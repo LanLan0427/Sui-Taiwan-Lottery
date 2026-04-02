@@ -1,26 +1,38 @@
-# Sui Lucky Draw (BermuDAO Hackathon)
+# Sui Taiwan Lottery
 
 Language:
 - English (this file)
 - Traditional Chinese: [README.zh-TW.md](README.zh-TW.md)
 
-Taiwan scratch-lottery gameplay now with **Sui Randomness module integration** (0x8) for +10 bonus scoring.
+This project is a Sui-based Taiwan scratch-lottery demo built for hackathon review.
+Gameplay uses an on-chain **TWD test token** for ticket purchases, payouts, and admin funding.
+Players still use **SUI testnet gas** for transaction fees.
 
-Frontend + Move smart contract for Sui Sprout submission:
+## What It Does
 
-- Taiwan scratch-card flow (buy, scratch, reveal, claim)
-- Player tier multiplier (Sprout/Bloom/Bermu Pro/Sui Master)
-- **Move contract with official Randomness** (`new_generator`, `generate_u32`)
-- Transaction signing layer ready for on-chain calls
+- Scratch-card gameplay with buy, reveal, claim, and admin controls
+- Three ticket tiers priced in TWD: NT$200, NT$500, NT$2,000
+- On-chain randomness via Sui official Randomness module (`0x8`)
+- Separate balances for TWD gameplay funds and SUI gas
+- Admin panel for granting TWD, topping up the prize vault, and withdrawing funds
+- Optional onchain_invoice helpers remain wired in the frontend for related test-token flows
+
+## Ticket Overview
+
+- NT$200 ticket: lower odds, smaller prizes
+- NT$500 ticket: medium odds, medium prizes
+- NT$2,000 ticket: higher entry price, broader prize range
+
+The current UI intentionally shows realistic prize ranges instead of every outcome being a jackpot.
 
 ## Tech Stack
 
-- **Frontend:** React 18 + TypeScript + Vite
-- **Blockchain:** Sui dApp Kit + @mysten/sui/transactions
-- **Smart Contract:** Move (edition 2024.beta) with sui::random integration
-- **Official Modules:** `0x2` (Framework) + `0x8` (Randomness)
+- Frontend: React 18 + TypeScript + Vite
+- Blockchain UI: Sui dApp Kit + `@mysten/sui/transactions`
+- Smart Contract: Move with `sui::random`
+- Network: Sui testnet
 
-## Quick Start
+## Setup
 
 1. Install dependencies
 
@@ -34,19 +46,25 @@ npm install
 copy .env.example .env
 ```
 
-Configure:
-- `VITE_SUI_NETWORK=testnet`
-- `VITE_SUI_FULLNODE_URL=<testnet_endpoint>`
-- `VITE_SUI_FRAMEWORK_PACKAGE_ID=0x2`
-- `VITE_SUI_RANDOM_PACKAGE_ID=0x8`
+3. Fill in the deployed IDs
 
-3. Run dev server
+- `VITE_SUI_NETWORK`
+- `VITE_SUI_FULLNODE_URL`
+- `VITE_SUI_FRAMEWORK_PACKAGE_ID`
+- `VITE_SUI_RANDOM_PACKAGE_ID`
+- `VITE_LOTTERY_PACKAGE_ID`
+- `VITE_LOTTERY_OBJECT_ID`
+- `VITE_TWD_BANK_OBJECT_ID`
+
+Optional onchain_invoice values are still supported if you want the extra test-token flow in the admin panel.
+
+4. Run the app
 
 ```bash
 npm run dev
 ```
 
-4. Build for production
+5. Build for production
 
 ```bash
 npm run build
@@ -54,105 +72,98 @@ npm run build
 
 ## Smart Contract
 
-The Move contract (`contracts/lottery/sources/lottery.move`) features:
+The Move contract lives in [contracts/lottery/sources/lottery.move](contracts/lottery/sources/lottery.move).
 
-- **buy_scratch_card()** - Generates 9-cell scratch board using Sui Randomness
-  - Supports 3 ticket tiers: 20M, 50M, 100M mist
-  - Applies player tier multiplier (1.0x → 1.5x)
-  - Stores payout probability on-chain
-  
-- **settle_scratch()** - Validates and distributes prize to player wallet
-  
-- **new_round()** - Owner-controlled round advancement
+Main functions:
 
-- **Official Randomness Integration:**
-  ```move
-  let mut gen = sui::random::new_generator(random, ctx);
-  let roll = (sui::random::generate_u32(&mut gen) as u64) % 10000;
-  ```
+- `buy_scratch_card()` buys a ticket with TWD and generates a board on-chain
+- `settle_scratch()` settles the winning payout after reveal
+- `top_up()` moves TWD into the prize vault
+- `withdraw()` lets the owner remove TWD from the vault
+- `claim_test_twd()` mints test TWD from the shared bank
 
-## Frontend Transaction Layer
+Randomness uses the official Sui module:
 
-New transaction utilities in `src/utils/transactions.ts`:
+```move
+let mut gen = sui::random::new_generator(random, ctx);
+let roll = (sui::random::generate_u32(&mut gen) as u64) % 10000;
+```
 
-- `buildBuyScratchCardTx()` - Creates PTB for scratch card purchase
-- `buildSettleScratchTx()` - Creates PTB for prize settlement
-- `getContractIds()` - Loads IDs from environment
+## Frontend Flow
 
-The React component (`src/App.tsx`) integrates `useSignAndExecuteTransaction` hook and falls back to demo mode until contract deployment.
+The main UI is in [src/App.tsx](src/App.tsx) and transaction builders are in [src/utils/transactions.ts](src/utils/transactions.ts).
 
-## Official Package ID Integration
+- `buildBuyScratchCardTx()` builds the purchase transaction
+- `buildSettleScratchTx()` builds the claim transaction
+- `buildTopUpTx()` tops up the prize vault
+- `buildClaimTestTwdTx()` mints playable TWD for judges or players
+- `getContractIds()` reads deployment IDs from the environment
 
-This project shows commitment to Hackathon bonus criteria:
+## Environment Example
 
-- `VITE_SUI_FRAMEWORK_PACKAGE_ID=0x2` (Sui Framework)
-- `VITE_SUI_RANDOM_PACKAGE_ID=0x8` → **Used in Move contract** for trustless randomness
-- UI explicitly displays these for auditing
+The sample env file is [.env.example](.env.example).
+
+Required entries:
+
+- `VITE_SUI_NETWORK`
+- `VITE_SUI_FULLNODE_URL`
+- `VITE_SUI_FRAMEWORK_PACKAGE_ID`
+- `VITE_SUI_RANDOM_PACKAGE_ID`
+- `VITE_LOTTERY_PACKAGE_ID`
+- `VITE_LOTTERY_OBJECT_ID`
+- `VITE_TWD_BANK_OBJECT_ID`
+
+Optional entries:
+
+- `VITE_INVOICE_PACKAGE_ID`
+- `VITE_INVOICE_SYSTEM_ID`
+- `VITE_INVOICE_TREASURY_ID`
+- `VITE_INVOICE_USDC_TREASURY_CAP_ID`
+- `VITE_INVOICE_TAX_TREASURY_CAP_ID`
+- `VITE_INVOICE_ADMIN_ID`
 
 ## Project Structure
 
-```
+```text
 .
 ├── src/
-│   ├── App.tsx              # Main game component
-│   ├── App.css              # Taiwan scratch-lottery styling
-│   ├── main.tsx             # React entry, Sui provider setup
-│   ├── utils/
-│   │   └── transactions.ts  # Move transaction builders
-│   └── vite-env.d.ts        # Vite env type definitions
+│   ├── App.tsx
+│   ├── AdminPanel.tsx
+│   ├── main.tsx
+│   └── utils/transactions.ts
 ├── contracts/lottery/
-│   ├── Move.toml            # Sui testnet dependencies
-│   └── sources/
-│       └── lottery.move     # Main smart contract (✅ compiles)
-├── .env.example             # Config template
-├── tsconfig.json
-├── vite.config.ts
+│   ├── Move.toml
+│   └── sources/lottery.move
+├── .env.example
+├── README.zh-TW.md
 └── package.json
 ```
 
-## Deployment to Sui Testnet
+## Deployment
 
-### Step 1: Publish Move Contract
+1. Build the contract
 
 ```bash
 cd contracts/lottery
+sui move build
+```
+
+2. Publish to testnet
+
+```bash
 sui client publish --gas-budget 100000000
 ```
 
-Capture output:
-- `Package ID` → `VITE_LOTTERY_PACKAGE_ID`
-- `Lottery Object ID` → `VITE_LOTTERY_OBJECT_ID`
+3. Copy the published package and object IDs into `.env`
 
-### Step 2: Update Environment
-
-```bash
-# .env
-VITE_LOTTERY_PACKAGE_ID=0x<your_package_id>
-VITE_LOTTERY_OBJECT_ID=0x<your_lottery_object_id>
-```
-
-### Step 3: Rebuild & Test
+4. Rebuild the frontend
 
 ```bash
 npm run build
-npm run dev
-# Connect wallet (Sui testnet), buy ticket, claim prize
 ```
 
-## Verification Checklist - Hackathon Submission
+## Notes
 
-- ✅ **Taiwan scratch-lottery gameplay** implemented in React + Move
-- ✅ **Sui Randomness module (0x8)** integrated in Move::lottery_move::scratch::buy_scratch_card
-- ✅ **Official package IDs (0x2, 0x8)** displayed in UI + used on-chain
-- ✅ **Move contract** compiles successfully with Randomness support
-- ✅ **Transaction layer** ready (buttons wired, just awaiting contract deployment)
-- ✅ **Bilingual UI** (EN + Traditional Chinese)
-- [ ] On-chain deployment (pending player PTB funding)
-- [ ] End-to-end testing on testnet
-
-## Next Actions
-
-1. **Deploy** Move contract to testnet
-2. **Wire transactions** - uncomment PTB logic in `buyScratchCard()`, `claimPrize()`
-3. **Test end-to-end** on testnet with funded wallet
-4. **Submit** to Sui Sprout Hackathon with deployment evidence
+- The game economy is TWD-first; only gas uses SUI.
+- Prize rates and payout ranges were tuned down to feel closer to real lottery odds.
+- The repository includes bilingual documentation and a judge flow guide in [HACKATHON_JUDGE_FLOW.zh-TW.md](HACKATHON_JUDGE_FLOW.zh-TW.md).
