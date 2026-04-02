@@ -169,19 +169,21 @@ export function buildWithdrawTx(
  * 從環境變數取得部署的合約 ID
  */
 export function getContractIds() {
+  const clean = (value?: string) => value?.trim();
+
   return {
-    framework: import.meta.env.VITE_SUI_FRAMEWORK_PACKAGE_ID || "0x2",
-    randomness: import.meta.env.VITE_SUI_RANDOM_PACKAGE_ID || "0x8",
-    lottery: import.meta.env.VITE_LOTTERY_PACKAGE_ID,
-    lotteryObject: import.meta.env.VITE_LOTTERY_OBJECT_ID,
-    twdBankObject: import.meta.env.VITE_TWD_BANK_OBJECT_ID,
+    framework: clean(import.meta.env.VITE_SUI_FRAMEWORK_PACKAGE_ID) || "0x2",
+    randomness: clean(import.meta.env.VITE_SUI_RANDOM_PACKAGE_ID) || "0x8",
+    lottery: clean(import.meta.env.VITE_LOTTERY_PACKAGE_ID),
+    lotteryObject: clean(import.meta.env.VITE_LOTTERY_OBJECT_ID),
+    twdBankObject: clean(import.meta.env.VITE_TWD_BANK_OBJECT_ID),
     // onchain_invoice
-    invoicePackage: import.meta.env.VITE_INVOICE_PACKAGE_ID,
-    invoiceSystem: import.meta.env.VITE_INVOICE_SYSTEM_ID,
-    invoiceTreasury: import.meta.env.VITE_INVOICE_TREASURY_ID,
-    invoiceUsdcTreasuryCap: import.meta.env.VITE_INVOICE_USDC_TREASURY_CAP_ID,
-    invoiceTaxTreasuryCap: import.meta.env.VITE_INVOICE_TAX_TREASURY_CAP_ID,
-    invoiceAdmin: import.meta.env.VITE_INVOICE_ADMIN_ID,
+    invoicePackage: clean(import.meta.env.VITE_INVOICE_PACKAGE_ID),
+    invoiceSystem: clean(import.meta.env.VITE_INVOICE_SYSTEM_ID),
+    invoiceTreasury: clean(import.meta.env.VITE_INVOICE_TREASURY_ID),
+    invoiceUsdcTreasuryCap: clean(import.meta.env.VITE_INVOICE_USDC_TREASURY_CAP_ID),
+    invoiceTaxTreasuryCap: clean(import.meta.env.VITE_INVOICE_TAX_TREASURY_CAP_ID),
+    invoiceAdmin: clean(import.meta.env.VITE_INVOICE_ADMIN_ID),
   };
 }
 

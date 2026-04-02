@@ -371,6 +371,7 @@ function App() {
 
   const t = content[locale]
   const activeTicket = ticketTypes.find((item) => item.id === selectedTicket) ?? ticketTypes[1]
+  const normalizeAddress = (value?: string | null) => value?.trim().toLowerCase() ?? null
 
   // 查詢錢包餘額
   const refreshBalance = useCallback(async () => {
@@ -556,7 +557,7 @@ function App() {
     }).then(res => {
       if (res.data?.content?.dataType === 'moveObject') {
         const fields = res.data.content.fields as any
-        setLotteryOwner(fields.owner)
+        setLotteryOwner(typeof fields.owner === 'string' ? fields.owner.trim() : null)
       }
     }).catch(err => console.error('Failed to fetch lottery owner:', err))
   }, [suiClient])
@@ -992,7 +993,7 @@ function App() {
               >
                 {locale === 'zh' ? '⛽ 領 SUI 測試幣' : '⛽ Get SUI Gas'}
               </button>
-              {account?.address && lotteryOwner && account.address === lotteryOwner && (
+              {normalizeAddress(account?.address) && normalizeAddress(lotteryOwner) && normalizeAddress(account?.address) === normalizeAddress(lotteryOwner) && (
                 <button 
                   onClick={() => setIsAdminOpen(true)}
                   style={{background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer'}}
