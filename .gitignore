@@ -25,6 +25,16 @@ dist-ssr
 
 .env
 
+# Local publish / debug artifacts
+admin-*.json
+tx-*.json
+wallet-objects.json
+lottery-publish.txt
+lottery-twd-publish.txt
+onchain-invoice-publish.txt
+contracts/lottery_republish/
+contracts/lottery_republish_twd/
+
 
 .sui_tx*.json
 contracts/onchain_invoice_repo/
