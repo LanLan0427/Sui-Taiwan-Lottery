@@ -3,6 +3,7 @@ import { Transaction } from "@mysten/sui/transactions";
 export interface BuyScratchCardParams {
   lotteryObjectId: string;
   randomObjectId: string;
+  paymentCoinObjectId: string;
   ticketTier: number; // 0, 1, 2
   playerTier: number; // 0, 1, 2, 3
   packageId: string;
@@ -16,24 +17,36 @@ export interface SettleScratchParams {
 
 export interface TopUpParams {
   lotteryObjectId: string;
+  paymentCoinObjectId: string;
   amount: bigint;
   packageId: string;
 }
 
+export interface ClaimTestTwdParams {
+  bankObjectId: string;
+  amount: bigint;
+  recipient: string;
+  packageId: string;
+}
+
 /**
- * 根據票券等級返回價格 (mist)
+ * 根據票券等級返回價格 (TWD cent, 2 decimals)
  */
 function getPriceByTier(tier: number): bigint {
   switch (tier) {
     case 0:
-      return BigInt(20_000_000); // 0.02 SUI
+      return BigInt(20_000); // NT$200.00
     case 1:
-      return BigInt(50_000_000); // 0.05 SUI
+      return BigInt(50_000); // NT$500.00
     case 2:
-      return BigInt(100_000_000); // 0.1 SUI
+      return BigInt(200_000); // NT$2000.00
     default:
-      return BigInt(50_000_000);
+      return BigInt(50_000);
   }
+}
+
+export function getTwdCoinType(packageId: string): string {
+  return `${packageId}::scratch::SCRATCH`;
 }
 
 /**
@@ -47,16 +60,14 @@ export function ticketIdToTier(id: string): number {
 }
 
 /**
- * 構建購買刮卡交易
- * 使用 tx.gas 自動從 gas coin 分幣支付，無需手動指定 coin object
+ * 構建購買刮卡交易 (使用 TWD 代幣支付)
  */
 export function buildBuyScratchCardTx(
   params: BuyScratchCardParams
 ): Transaction {
   const tx = new Transaction();
 
-  // 從 gas coin 分出所需金額
-  const [coin] = tx.splitCoins(tx.gas, [getPriceByTier(params.ticketTier)]);
+  const [coin] = tx.splitCoins(tx.object(params.paymentCoinObjectId), [getPriceByTier(params.ticketTier)]);
 
   // 調用 Move 合約 buy_scratch_card
   tx.moveCall({
@@ -93,14 +104,14 @@ export function buildSettleScratchTx(
 }
 
 /**
- * 構建充值交易 (Admin Only)
+ * 構建充值交易 (Admin Only, TWD)
  */
 export function buildTopUpTx(
   params: TopUpParams
 ): Transaction {
   const tx = new Transaction();
 
-  const [coin] = tx.splitCoins(tx.gas, [params.amount]);
+  const [coin] = tx.splitCoins(tx.object(params.paymentCoinObjectId), [params.amount]);
 
   tx.moveCall({
     target: `${params.packageId}::scratch::top_up`,
@@ -117,6 +128,22 @@ export interface WithdrawParams {
   lotteryObjectId: string;
   amount: bigint;
   packageId: string;
+}
+
+/**
+ * 領取測試 TWD
+ */
+export function buildClaimTestTwdTx(params: ClaimTestTwdParams): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${params.packageId}::scratch::claim_test_twd`,
+    arguments: [
+      tx.object(params.bankObjectId),
+      tx.pure.u64(params.amount),
+      tx.pure.address(params.recipient),
+    ],
+  });
+  return tx;
 }
 
 /**
@@ -147,6 +174,7 @@ export function getContractIds() {
     randomness: import.meta.env.VITE_SUI_RANDOM_PACKAGE_ID || "0x8",
     lottery: import.meta.env.VITE_LOTTERY_PACKAGE_ID,
     lotteryObject: import.meta.env.VITE_LOTTERY_OBJECT_ID,
+    twdBankObject: import.meta.env.VITE_TWD_BANK_OBJECT_ID,
     // onchain_invoice
     invoicePackage: import.meta.env.VITE_INVOICE_PACKAGE_ID,
     invoiceSystem: import.meta.env.VITE_INVOICE_SYSTEM_ID,

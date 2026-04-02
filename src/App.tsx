@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
 import './App.css'
-import { getContractIds, buildBuyScratchCardTx, buildSettleScratchTx, ticketIdToTier, buildOneStopInvoiceTx } from './utils/transactions'
+import { getContractIds, buildBuyScratchCardTx, buildClaimTestTwdTx, buildSettleScratchTx, getTwdCoinType, ticketIdToTier } from './utils/transactions'
 import { AnimatedNumber } from './AnimatedNumber'
 import { playCoinSound, playScratchSound, playWinSound } from './utils/audio'
 import { AdminPanel } from './AdminPanel'
@@ -26,7 +26,7 @@ const content = {
     winningOdds: 'Estimated Win Rate',
     oddsHint: 'Tier bonus improves expected payout',
     buyTickets: 'Buy Scratch Ticket',
-    ticketPrice: 'Ticket price',
+    ticketPrice: 'Ticket price (NTD ref)',
     connectedButton: 'Buy & Generate Scratch Card',
     disconnectedButton: 'Connect Wallet to Buy',
     ticketsOwned: 'Cards purchased',
@@ -72,8 +72,8 @@ const content = {
     hotGames: 'Hot Scratch Games',
     searchTicket: 'Search by game keyword',
     searchPlaceholder: 'Try: lucky, gold, fortune...',
-    filterPrice: 'Filter by price (SUI)',
-    allPrice: 'All SUI prices',
+    filterPrice: 'Filter by price (NTD)',
+    allPrice: 'All NTD prices',
     totalOddsLabel: 'Total odds',
     maxPrizeLabel: 'Max payout',
     selectThisTicket: 'Select this ticket',
@@ -93,7 +93,7 @@ const content = {
     winningOdds: '預估中獎率',
     oddsHint: '等級加成會提高期望回饋',
     buyTickets: '購買刮刮樂',
-    ticketPrice: '票價',
+    ticketPrice: '票價（台彩參考）',
     connectedButton: '購買並產生刮卡',
     disconnectedButton: '請先連接錢包',
     ticketsOwned: '已購買張數',
@@ -139,8 +139,8 @@ const content = {
     hotGames: '熱賣中刮刮樂',
     searchTicket: '請搜尋遊戲關鍵字',
     searchPlaceholder: '例如：幸運、財神、金幣...',
-    filterPrice: '請選擇 SUI 票價',
-    allPrice: '全部 SUI 票價',
+    filterPrice: '請選擇台幣面額',
+    allPrice: '全部台幣面額',
     totalOddsLabel: '總中獎率',
     maxPrizeLabel: '最高可得',
     selectThisTicket: '選擇這張',
@@ -174,9 +174,11 @@ type TicketType = {
     en: string
     zh: string
   }
+  priceNtd: number
   priceSui: number
   winRate: string
   maxPayoutSui: number
+  prizeGuide: string[]
 }
 
 type BoardData = 
@@ -197,25 +199,42 @@ const ticketTypes: TicketType[] = [
     id: 't200',
     gameType: 'match3',
     title: { en: 'Fortune Line', zh: '出棋制勝' },
+    priceNtd: 200,
     priceSui: 0.02,
-    winRate: '30.10%',
-    maxPayoutSui: 0.4,
+    winRate: '0.25%',
+    maxPayoutSui: 1200,
+    prizeGuide: [
+      '3 × 7 = NT$1,200',
+      '3 × BAR = NT$800',
+      '3 × DIAMOND = NT$400',
+      '3 × CLOVER = NT$200',
+    ],
   },
   {
     id: 't500',
     gameType: 'beat_score',
-    title: { en: 'Fishing Master', zh: '釣魚高手' },
+    title: { en: 'Diamond Rush', zh: '鑽很大' },
+    priceNtd: 500,
     priceSui: 0.05,
-    winRate: '40.14%',
-    maxPayoutSui: 1,
+    winRate: '1.20%',
+    maxPayoutSui: 3000,
+    prizeGuide: [
+      '打敗對手 = NT$100 ~ NT$3,000',
+      '連勝 2 局 = NT$500 bonus',
+    ],
   },
   {
     id: 't1000',
     gameType: 'match_number',
-    title: { en: 'Lucky Star', zh: '幸運號碼' },
+    title: { en: 'Super Red Pack', zh: '超級紅包' },
+    priceNtd: 2000,
     priceSui: 0.1,
-    winRate: '25.10%',
-    maxPayoutSui: 2,
+    winRate: '3.50%',
+    maxPayoutSui: 12000,
+    prizeGuide: [
+      '對中幸運號碼 = NT$2,000 ~ NT$12,000',
+      '每個號碼都有獨立獎金',
+    ],
   },
 ]
 
@@ -263,7 +282,7 @@ function buildBoardData(gameType: GameType, isWinner: boolean, payoutSui: number
     const winningNumber = randomInt(99) + 1;
     let yourNumbers = Array.from({ length: 6 }, () => ({
       num: randomInt(99) + 1,
-      prize: randomInt(10) > 5 ? Number((0.02 * randomInt(5)).toFixed(3)) : 0, 
+      prize: [200, 400, 600, 800, 1000, 1200][randomInt(6)],
       isWin: false
     }));
     
@@ -283,7 +302,7 @@ function buildBoardData(gameType: GameType, isWinner: boolean, payoutSui: number
     let rows = Array.from({ length: 4 }, () => {
       const opponent = randomInt(15) + 5;
       let yours = randomInt(opponent); // lose by default
-      return { yours, opponent, prize: randomInt(10) > 5 ? Number((0.02 * randomInt(5)).toFixed(3)) : 0, isWin: false };
+      return { yours, opponent, prize: [100, 200, 300, 500, 800, 1000, 1500, 3000][randomInt(8)], isWin: false };
     });
     
     if (isWinner) {
@@ -329,7 +348,7 @@ function App() {
   const [locale, setLocale] = useState<Locale>('zh')
   const [selectedTicket, setSelectedTicket] = useState<TicketId>('t500')
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [priceFilter, setPriceFilter] = useState<'all' | '0.02' | '0.05' | '0.1'>('all')
+  const [priceFilter, setPriceFilter] = useState<'all' | '200' | '500' | '2000'>('all')
   const [myTickets, setMyTickets] = useState(0)
   const [totalSpentSui, setTotalSpentSui] = useState(0)
   const [totalWonSui, setTotalWonSui] = useState(0)
@@ -338,7 +357,9 @@ function App() {
   const [scratchCardObjectId, setScratchCardObjectId] = useState<string | null>(null)
   const [scratchPercent, setScratchPercent] = useState(0)
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
+  const [walletTwdBalance, setWalletTwdBalance] = useState<number | null>(null)
   const [isFaucetLoading, setIsFaucetLoading] = useState(false)
+  const [faucetError, setFaucetError] = useState<string | null>(null)
   const [isAdminOpen, setIsAdminOpen] = useState(false)
   const [lotteryOwner, setLotteryOwner] = useState<string | null>(null)
 
@@ -355,56 +376,167 @@ function App() {
   const refreshBalance = useCallback(async () => {
     if (!account?.address) {
       setWalletBalance(null)
+      setWalletTwdBalance(null)
       return
     }
+    const ids = getContractIds()
+
     try {
-      const balance = await suiClient.getBalance({ owner: account.address })
-      setWalletBalance(Number(balance.totalBalance) / 1_000_000_000)
+      const suiBalance = await suiClient.getBalance({ owner: account.address })
+      setWalletBalance(Number(suiBalance.totalBalance) / 1_000_000_000)
     } catch (err) {
-      console.error('Failed to fetch balance:', err)
+      console.error('Failed to fetch SUI balance:', err)
+      setWalletBalance(null)
+    }
+
+    const hasValidLotteryPackage = Boolean(ids.lottery && /^0x[0-9a-fA-F]+$/.test(ids.lottery))
+    if (!hasValidLotteryPackage) {
+      setWalletTwdBalance(null)
+      return
+    }
+
+    try {
+      const twdBalance = await suiClient.getBalance({
+        owner: account.address,
+        coinType: getTwdCoinType(ids.lottery as string),
+      })
+      setWalletTwdBalance(Number(twdBalance.totalBalance) / 100)
+    } catch (err) {
+      console.warn('Failed to fetch TWD balance:', err)
+      setWalletTwdBalance(null)
     }
   }, [account?.address, suiClient])
+
+  const getFaucetErrorMessage = useCallback((raw: string) => {
+    const message = raw.toLowerCase()
+
+    if (message.includes('missing_invoice_env:')) {
+      const splitIdx = raw.indexOf(':')
+      const missingKeys = splitIdx >= 0 ? raw.slice(splitIdx + 1).trim() : ''
+      return locale === 'zh'
+        ? `缺少台幣發放設定：${missingKeys}`
+        : `Missing TWD funding settings: ${missingKeys}`
+    }
+
+    if (message.includes('invalid_invoice_env:')) {
+      const splitIdx = raw.indexOf(':')
+      const invalidKeys = splitIdx >= 0 ? raw.slice(splitIdx + 1).trim() : ''
+      return locale === 'zh'
+        ? `台幣發放設定格式錯誤：${invalidKeys}`
+        : `Invalid TWD funding settings format: ${invalidKeys}`
+    }
+
+    if (message.includes('invoice_cap_owner_mismatch:')) {
+      const splitIdx = raw.indexOf(':')
+      const owner = splitIdx >= 0 ? raw.slice(splitIdx + 1).trim() : ''
+      return locale === 'zh'
+        ? `目前錢包不是發放管理錢包。請切換到 ${owner.slice(0, 10)}...${owner.slice(-6)} 後再發放。`
+        : `Current wallet is not the funding admin wallet. Switch to ${owner.slice(0, 10)}...${owner.slice(-6)} and retry.`
+    }
+
+    if (message.includes('not signed by the correct sender')) {
+      return locale === 'zh'
+        ? '目前錢包不是 TreasuryCap 持有人，請切回管理錢包再發放。'
+        : 'Current wallet is not the TreasuryCap owner. Switch to the admin wallet and retry.'
+    }
+
+    if (message.includes('429') || message.includes('too many')) {
+      return locale === 'zh'
+        ? '發放請求太頻繁，請稍後重試。'
+        : 'Funding request is rate-limited. Please retry later.'
+    }
+
+    if (message.includes('400') || message.includes('invalid')) {
+      return locale === 'zh'
+        ? '發放請求格式無效，請確認地址與網路設定。'
+        : 'Invalid funding request format. Please check wallet address and network settings.'
+    }
+
+    if (message.includes('403') || message.includes('forbidden')) {
+      return locale === 'zh'
+        ? '發放被拒絕，請確認 TreasuryCap 與合約權限設定。'
+        : 'Funding is forbidden. Please verify TreasuryCap ownership and contract permissions.'
+    }
+
+    if (message.includes('failed to fetch') || message.includes('networkerror')) {
+      return locale === 'zh'
+        ? '無法連線到節點或服務，請檢查網路或稍後再試。'
+        : 'Cannot reach node/service. Please check your network and try again later.'
+    }
+
+    return locale === 'zh'
+      ? '發放失敗，請確認 onchain_invoice 參數是否完整。'
+      : 'Funding failed. Please verify onchain_invoice environment values.'
+  }, [locale])
 
   const requestTestnetSui = useCallback(async () => {
     if (!account?.address) return
 
-    const network = (import.meta.env.VITE_SUI_NETWORK || 'testnet').toLowerCase()
-    if (network !== 'testnet') {
-      window.alert(locale === 'zh' ? 'Faucet 目前只支援 Testnet，請先切換網路。' : 'Faucet is currently available for testnet only.')
-      return
-    }
+    const ids = getContractIds()
+    const isValidObjectId = (value?: string) => Boolean(value && /^0x[0-9a-fA-F]+$/.test(value))
+    const requiredTwdKeys: Array<[string, string | undefined]> = [
+      ['VITE_LOTTERY_PACKAGE_ID', ids.lottery],
+      ['VITE_TWD_BANK_OBJECT_ID', ids.twdBankObject],
+    ]
+    const missingInvoiceKeys = requiredTwdKeys
+      .filter(([, value]) => !value)
+      .map(([key]) => key)
+    const invalidInvoiceKeys = requiredTwdKeys
+      .filter(([, value]) => Boolean(value) && !isValidObjectId(value))
+      .map(([key]) => key)
 
     setIsFaucetLoading(true)
+    setFaucetError(null)
     try {
-      const response = await fetch('https://faucet.testnet.sui.io/v2/gas', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          FixedAmountRequest: {
-            recipient: account.address,
-          },
-        }),
-      })
-
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || `HTTP ${response.status}`)
+      if (missingInvoiceKeys.length > 0) {
+        throw new Error(`MISSING_INVOICE_ENV:${missingInvoiceKeys.join(', ')}`)
+      }
+      if (invalidInvoiceKeys.length > 0) {
+        throw new Error(`INVALID_INVOICE_ENV:${invalidInvoiceKeys.join(', ')}`)
       }
 
-      window.alert(locale === 'zh' ? '已送出 Faucet 請求，請稍候幾秒後再查看餘額。' : 'Faucet request sent. Please wait a few seconds and check your balance.')
+      const tx = buildClaimTestTwdTx({
+        bankObjectId: ids.twdBankObject as string,
+        amount: BigInt(100_000), // NT$1000.00 with 2 decimals
+        recipient: account.address,
+        packageId: ids.lottery as string,
+      })
+      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      window.alert(
+        locale === 'zh'
+          ? `✅ 已領取 1000 台幣！TX: ${result.digest.slice(0, 12)}...`
+          : `✅ 1000 TWD test token granted! TX: ${result.digest.slice(0, 12)}...`
+      )
+
       setTimeout(() => {
         refreshBalance()
       }, 2500)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to request faucet:', error)
-      window.open('https://faucet.sui.io/', '_blank', 'noopener,noreferrer')
-      window.alert(locale === 'zh' ? '自動領取失敗，已開啟官方 Faucet 頁面。' : 'Auto faucet failed. Opened official faucet page.')
+      const nextError = getFaucetErrorMessage(String(error?.message || ''))
+      setFaucetError(nextError)
+      window.alert(nextError)
     } finally {
       setIsFaucetLoading(false)
     }
-  }, [account?.address, locale, refreshBalance])
+  }, [account?.address, getFaucetErrorMessage, locale, refreshBalance])
+
+  const getTwdCoinObjectIdForAmount = useCallback(async (amountCent: number) => {
+    const ids = getContractIds()
+    if (!account?.address || !ids.lottery) return null
+
+    const coins = await suiClient.getCoins({
+      owner: account.address,
+      coinType: getTwdCoinType(ids.lottery),
+      limit: 50,
+    })
+    const found = coins.data.find((coin) => BigInt(coin.balance) >= BigInt(amountCent))
+    return found?.coinObjectId ?? null
+  }, [account?.address, suiClient])
+
+  const openOfficialFaucet = useCallback(() => {
+    window.open('https://faucet.sui.io/', '_blank', 'noopener,noreferrer')
+  }, [])
 
   useEffect(() => {
     refreshBalance()
@@ -434,7 +566,7 @@ function App() {
         searchKeyword.trim().length === 0 ||
         item.title.en.toLowerCase().includes(searchKeyword.trim().toLowerCase()) ||
         item.title.zh.includes(searchKeyword.trim())
-      const passPrice = priceFilter === 'all' || String(item.priceSui) === priceFilter
+      const passPrice = priceFilter === 'all' || String(item.priceNtd) === priceFilter
       return passKeyword && passPrice
     })
   }, [priceFilter, searchKeyword])
@@ -631,9 +763,14 @@ function App() {
     try {
       const tier = ticketIdToTier(ticket.id)
       const currentTierIdx = tiers.indexOf(currentTier)
+      const twdCoinObjectId = await getTwdCoinObjectIdForAmount(ticket.priceNtd * 100)
+      if (!twdCoinObjectId) {
+        throw new Error(locale === 'zh' ? '台幣餘額不足，請先按上方「補 1000 台幣」。' : 'Insufficient TWD balance. Click "Get 1000 TWD" first.')
+      }
       const tx = buildBuyScratchCardTx({
         lotteryObjectId: ids.lotteryObject,
         randomObjectId: ids.randomness,
+        paymentCoinObjectId: twdCoinObjectId,
         ticketTier: tier,
         playerTier: currentTierIdx >= 0 ? currentTierIdx : 0,
         packageId: ids.lottery,
@@ -666,8 +803,8 @@ function App() {
           if (cardObj.data?.content?.dataType === 'moveObject') {
             const fields = cardObj.data.content.fields as any
             const payoutMist = fields.result_payout || '0'
-            realPayoutSui = Number(payoutMist) / 1_000_000_000
-            console.log('💰 On-chain real payout (SUI):', realPayoutSui)
+            realPayoutSui = Number(payoutMist) / 100
+            console.log('💰 On-chain real payout (TWD):', realPayoutSui)
           }
         } catch (fetchErr) {
           console.error('Failed to fetch card object details:', fetchErr)
@@ -687,30 +824,10 @@ function App() {
 
       setSession(nextSession)
       setMyTickets((prev) => prev + 1)
-      setTotalSpentSui((prev) => Number((prev + ticket.priceSui).toFixed(3)))
+      setTotalSpentSui((prev) => Number((prev + ticket.priceNtd).toFixed(2)))
       playCoinSound()
       setIsModalOpen(true)
       refreshBalance()
-
-      // 🧾 同時開立鏈上發票 (onchain_invoice 加分項目)
-      if (ids.invoicePackage && ids.invoiceSystem && ids.invoiceUsdcTreasuryCap && ids.invoiceTaxTreasuryCap && ids.invoiceTreasury) {
-        try {
-          const invoiceTx = buildOneStopInvoiceTx({
-            usdcTreasuryCapId: ids.invoiceUsdcTreasuryCap,
-            taxTreasuryCapId: ids.invoiceTaxTreasuryCap,
-            treasuryId: ids.invoiceTreasury,
-            systemId: ids.invoiceSystem,
-            recipient: account.address,
-            usdcAmount: BigInt(1_000_000), // 1 USDC (6 decimals)
-            protocol: 'SUI-Taiwan-Lottery',
-            packageId: ids.invoicePackage,
-          })
-          const invoiceResult = await signAndExecute({ transaction: await invoiceTx.toJSON() })
-          console.log('🧾 Invoice TX digest:', invoiceResult.digest)
-        } catch (invoiceErr) {
-          console.warn('⚠️ Invoice creation failed (non-critical):', invoiceErr)
-        }
-      }
     } catch (err) {
       console.error('❌ buy_scratch_card failed:', err)
     }
@@ -726,7 +843,7 @@ function App() {
     if (!session || !session.isFinished || session.isClaimed || session.payoutSui <= 0) return
     
     setSession({ ...session, isClaimed: true })
-    setTotalWonSui((prev) => Number((prev + session.payoutSui).toFixed(3)))
+    setTotalWonSui((prev) => Number((prev + session.payoutSui).toFixed(2)))
     playWinSound()
 
     // 送出鏈上結算交易
@@ -743,8 +860,18 @@ function App() {
           const result = await signAndExecute({ transaction: await tx.toJSON() })
           console.log('✅ settle_scratch TX digest:', result.digest)
           refreshBalance()
-        } catch (err) {
+        } catch (err: any) {
           console.error('❌ settle_scratch failed:', err)
+          const msg = String(err?.message || '')
+          if (msg.includes('abort code: 6') || msg.includes('E_INSUFFICIENT_VAULT')) {
+            window.alert(
+              locale === 'zh'
+                ? '❌ 領獎失敗：目前獎池餘額不足，請管理員先補充獎池台幣。'
+                : '❌ Claim failed: prize vault balance is insufficient. Ask admin to top up TWD vault first.'
+            )
+          } else {
+            window.alert(locale === 'zh' ? '❌ 領獎交易失敗，請稍後再試。' : '❌ Claim transaction failed. Please retry later.')
+          }
         }
       }
     }
@@ -844,17 +971,26 @@ function App() {
               {t.langZh}
             </button>
           </div>
-          {account && walletBalance !== null && (
+          {account && (
             <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+              <div style={{background: 'rgba(16,185,129,0.20)', padding: '0.5rem 1rem', borderRadius: '8px', color: '#fff', fontSize: '0.9rem', fontWeight: 700}}>
+                🧧 {walletTwdBalance !== null ? walletTwdBalance.toFixed(2) : '--'} TWD
+              </div>
               <div style={{background: 'rgba(255,255,255,0.15)', padding: '0.5rem 1rem', borderRadius: '8px', color: '#fff', fontSize: '0.9rem', fontWeight: 700}}>
-                💰 {walletBalance.toFixed(4)} SUI
+                ⛽ {walletBalance !== null ? walletBalance.toFixed(4) : '--'} SUI
               </div>
               <button
                 onClick={requestTestnetSui}
                 disabled={isFaucetLoading}
                 style={{background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 800, cursor: isFaucetLoading ? 'not-allowed' : 'pointer', opacity: isFaucetLoading ? 0.7 : 1}}
               >
-                {isFaucetLoading ? (locale === 'zh' ? '⏳ 補幣中' : '⏳ Funding') : (locale === 'zh' ? '🚰 補測試幣' : '🚰 Faucet')}
+                {isFaucetLoading ? (locale === 'zh' ? '⏳ 發放中' : '⏳ Funding') : (locale === 'zh' ? '🧧 補 1000 台幣' : '🧧 Get 1000 TWD')}
+              </button>
+              <button
+                onClick={openOfficialFaucet}
+                style={{background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px dashed rgba(255,255,255,0.45)', padding: '0.5rem 0.8rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer'}}
+              >
+                {locale === 'zh' ? '⛽ 領 SUI 測試幣' : '⛽ Get SUI Gas'}
               </button>
               {account?.address && lotteryOwner && account.address === lotteryOwner && (
                 <button 
@@ -870,12 +1006,20 @@ function App() {
         </div>
       </header>
 
+      {faucetError && (
+        <section style={{marginTop: '-0.4rem', marginBottom: '0.8rem'}}>
+          <div style={{maxWidth: '1200px', margin: '0 auto', padding: '0.7rem 1rem', borderRadius: '10px', background: '#fff3f0', border: '1px solid #ffd0c7', color: '#ad2102', fontSize: '0.9rem'}}>
+            {faucetError}
+          </div>
+        </section>
+      )}
+
       <section className="market-section">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom: '1.5rem', marginTop: '1rem'}}>
           <h2 style={{fontSize: '2rem', margin: 0, color: '#333'}}>{t.buyTickets}</h2>
           <div style={{display:'flex', gap:'1.5rem', fontSize:'0.9rem', color:'#666'}}>
-            <div>{t.totalSpent}: <AnimatedNumber value={totalSpentSui} decimals={3}/> SUI</div>
-            <div>{t.totalWon}: <AnimatedNumber value={totalWonSui} decimals={3}/> SUI</div>
+            <div>{t.totalSpent}: <AnimatedNumber value={totalSpentSui} decimals={2}/> TWD</div>
+            <div>{t.totalWon}: <AnimatedNumber value={totalWonSui} decimals={2}/> TWD</div>
             <div>{t.ticketsOwned}: <AnimatedNumber value={myTickets} duration={400}/></div>
           </div>
         </div>
@@ -894,14 +1038,14 @@ function App() {
             <button className={priceFilter === 'all' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('all')}>
               {locale === 'zh' ? '全部' : 'All'}
             </button>
-            <button className={priceFilter === '0.02' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('0.02')}>
-              0.02 SUI
+            <button className={priceFilter === '200' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('200')}>
+              NT$200
             </button>
-            <button className={priceFilter === '0.05' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('0.05')}>
-              0.05 SUI
+            <button className={priceFilter === '500' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('500')}>
+              NT$500
             </button>
-            <button className={priceFilter === '0.1' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('0.1')}>
-              0.1 SUI
+            <button className={priceFilter === '2000' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('2000')}>
+              NT$2000
             </button>
           </div>
         </div>
@@ -918,15 +1062,26 @@ function App() {
               </div>
               <div className="ticket-info">
                 <p className="ticket-title">{item.title[locale]}</p>
+                <p className="ticket-meta" style={{marginTop: '0.4rem'}}>{t.ticketPrice}: NT${item.priceNtd}</p>
                 <p className="ticket-meta" style={{marginTop: '0.4rem'}}>{t.totalOddsLabel}: {item.winRate}</p>
-                <p className="ticket-meta">{t.maxPrizeLabel}: {item.maxPayoutSui} SUI</p>
+                <p className="ticket-meta">{t.maxPrizeLabel}: NT${item.maxPayoutSui}</p>
+                <div style={{marginTop:'0.75rem', padding:'0.7rem', borderRadius:'10px', background:'#fafafa', border:'1px solid #eee'}}>
+                  <div style={{fontSize:'0.8rem', fontWeight:800, color:'#666', marginBottom:'0.35rem'}}>
+                    {locale === 'zh' ? '獎金說明' : 'Prize Guide'}
+                  </div>
+                  <ul style={{margin:0, paddingLeft:'1.1rem', color:'#555', fontSize:'0.82rem', lineHeight:1.55}}>
+                    {item.prizeGuide.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
                 
                 <button 
                   className="buy-btn"
                   onClick={(e) => { e.stopPropagation(); buyScratchCard(item); }}
                   disabled={isExecuting || isModalOpen || !account}
                 >
-                  {isExecuting ? '⏳ Processing...' : `💳 ${locale === 'zh' ? '購買' : 'Buy'} (${item.priceSui} SUI)`}
+                  {isExecuting ? '⏳ Processing...' : `💳 ${locale === 'zh' ? '購買' : 'Buy'} (NT$${item.priceNtd})`}
                 </button>
               </div>
             </div>
@@ -950,6 +1105,17 @@ function App() {
                 👉 {locale === 'zh' ? '本區玩法' : 'How to win'}: {getGameRule(session.boardData.type)}
               </strong>
             </p>
+
+            <div style={{marginTop:'1rem', padding:'0.9rem 1rem', borderRadius:'12px', background:'#fff8e8', border:'1px solid #f1d27b'}}>
+              <div style={{fontWeight:800, marginBottom:'0.4rem'}}>
+                {locale === 'zh' ? '獎金說明' : 'Prize Guide'}
+              </div>
+              <ul style={{margin:0, paddingLeft:'1.1rem', color:'#6b5b2a', fontSize:'0.92rem', lineHeight:1.6}}>
+                {activeTicket.prizeGuide.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
             
             <div 
               className="scratch-stage"
@@ -995,7 +1161,7 @@ function App() {
                          <div key={idx} className={`result-fishing-row ${row.isWin ? 'win' : ''}`}>
                            <div><span>{row.yours}</span></div>
                            <div><span>{row.opponent}</span></div>
-                           <div>{row.prize > 0 ? `${row.prize} SUI` : '-'}</div>
+                           <div>{`NT$${row.prize}`}</div>
                          </div>
                       ))}
                     </div>
@@ -1012,7 +1178,7 @@ function App() {
                         {session.boardData.yourNumbers.map((item, idx) => (
                           <div key={idx} className={`result-cell ${item.isWin ? 'win' : ''}`} style={item.isWin ? {borderColor: '#e60012', background: '#fff0f0'} : {}}>
                             <span>{item.num}</span>
-                            <span style={{fontSize: '0.95rem', color: '#666', marginTop: '0.2rem'}}>{item.prize > 0 ? `${item.prize} SUI` : '-'}</span>
+                            <span style={{fontSize: '0.95rem', color: '#666', marginTop: '0.2rem'}}>{`NT$${item.prize}`}</span>
                           </div>
                         ))}
                       </div>
@@ -1040,7 +1206,7 @@ function App() {
                   <>
                     <div className="status-icon">🏆</div>
                     <div className="status-text">{locale === 'zh' ? '恭喜中獎！' : 'WINNER!'}</div>
-                    <div className="status-prize">{session.payoutSui} SUI</div>
+                    <div className="status-prize">NT${session.payoutSui}</div>
                   </>
                 ) : (
                   <>
@@ -1093,7 +1259,7 @@ function App() {
                         disabled={isExecuting || !account}
                         style={{flex: 1}}
                       >
-                        {isExecuting ? '⏳ processing...' : locale === 'zh' ? `再來一張 (${activeTicket.priceSui} SUI)` : `Play Again (${activeTicket.priceSui} SUI)`}
+                        {isExecuting ? '⏳ processing...' : locale === 'zh' ? `再來一張 (NT$${activeTicket.priceNtd})` : `Play Again (NT$${activeTicket.priceNtd})`}
                       </button>
                     </div>
                   )}

@@ -1,11 +1,12 @@
 module lottery::scratch {
     use sui::balance::{Self, Balance};
-    use sui::coin::{Self, Coin};
+    use sui::coin::{Self, Coin, TreasuryCap};
     use sui::event;
     use sui::object::UID;
     use sui::random::Random;
-    use sui::sui::SUI;
     use sui::tx_context::TxContext;
+    use sui::transfer;
+    use std::option;
     use std::vector;
 
     const E_NOT_OWNER: u64 = 1;
@@ -16,14 +17,23 @@ module lottery::scratch {
     const E_INSUFFICIENT_VAULT: u64 = 6;
 
     const BOARD_SIZE: u64 = 9;
-    const PRICE_200_MIST: u64 = 20_000_000;
-    const PRICE_500_MIST: u64 = 50_000_000;
-    const PRICE_1000_MIST: u64 = 100_000_000;
+    // TWD is represented in cent units (2 decimals): NT$200.00 => 20000
+    const PRICE_200_TWD_CENT: u64 = 20_000;
+    const PRICE_500_TWD_CENT: u64 = 50_000;
+    const PRICE_2000_TWD_CENT: u64 = 200_000;
+
+    public struct SCRATCH has drop {}
+
+    public struct TwdBank has key {
+        id: UID,
+        admin: address,
+        treasury_cap: TreasuryCap<SCRATCH>,
+    }
 
     public struct ScratchLottery has key {
         id: UID,
         owner: address,
-        vault: Balance<SUI>,
+        vault: Balance<SCRATCH>,
         total_revenue: u64,
         total_payouts: u64,
         round: u64,
@@ -56,37 +66,68 @@ module lottery::scratch {
         round: u64,
     }
 
-    fun init(ctx: &mut TxContext) {
+    fun init(witness: SCRATCH, ctx: &mut TxContext) {
         let owner = sui::tx_context::sender(ctx);
+
+        let (treasury_cap, metadata) = coin::create_currency(
+            witness,
+            2,
+            b"TWD",
+            b"Taiwan Dollar Test Token",
+            b"Lottery in-game currency for testnet",
+            option::none(),
+            ctx,
+        );
+
+        transfer::public_freeze_object(metadata);
+
+        let bank = TwdBank {
+            id: sui::object::new(ctx),
+            admin: owner,
+            treasury_cap,
+        };
+
         let lottery = ScratchLottery {
             id: sui::object::new(ctx),
             owner,
-            vault: balance::zero<SUI>(),
+            vault: balance::zero<SCRATCH>(),
             total_revenue: 0,
             total_payouts: 0,
             round: 1,
             card_count: 0,
         };
+        transfer::share_object(bank);
         sui::transfer::share_object(lottery);
+    }
+
+    /// Public faucet for judges/players to claim test TWD.
+    public fun claim_test_twd(
+        bank: &mut TwdBank,
+        amount: u64,
+        recipient: address,
+        ctx: &mut TxContext,
+    ) {
+        let coin = coin::mint(&mut bank.treasury_cap, amount, ctx);
+        transfer::public_transfer(coin, recipient);
     }
 
     fun get_price_for_tier(tier: u64): u64 {
         if (tier == 1) {
-            PRICE_500_MIST
+            PRICE_500_TWD_CENT
         } else if (tier == 2) {
-            PRICE_1000_MIST
+            PRICE_2000_TWD_CENT
         } else {
-            PRICE_200_MIST
+            PRICE_200_TWD_CENT
         }
     }
 
     fun get_payout_multiplier(tier_level: u64): u64 {
         if (tier_level == 3) {
-            150
+            120
         } else if (tier_level == 2) {
-            125
-        } else if (tier_level == 1) {
             110
+        } else if (tier_level == 1) {
+            105
         } else {
             100
         }
@@ -95,12 +136,12 @@ module lottery::scratch {
     fun draw_winning_odds(random: &Random, ctx: &mut TxContext): u64 {
         let mut gen = sui::random::new_generator(random, ctx);
         let roll = (sui::random::generate_u32(&mut gen) as u64) % 10000;
-        if (roll < 300) {
+        if (roll < 25) {
+            10
+        } else if (roll < 120) {
             20
-        } else if (roll < 1500) {
-            6
-        } else if (roll < 4500) {
-            150
+        } else if (roll < 350) {
+            50
         } else {
             0
         }
@@ -128,7 +169,7 @@ module lottery::scratch {
     public fun buy_scratch_card(
         lottery: &mut ScratchLottery,
         random: &Random,
-        payment: Coin<SUI>,
+        payment: Coin<SCRATCH>,
         ticket_tier: u64,
         player_tier: u64,
         ctx: &mut TxContext,
@@ -213,7 +254,7 @@ module lottery::scratch {
     /// 合約擁有者可以手動注入資金到獎金池 (Vault)
     public fun top_up(
         lottery: &mut ScratchLottery,
-        payment: Coin<SUI>,
+        payment: Coin<SCRATCH>,
         _ctx: &mut TxContext,
     ) {
         balance::join(&mut lottery.vault, coin::into_balance(payment));

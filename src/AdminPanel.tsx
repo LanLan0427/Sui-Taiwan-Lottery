@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
-import { getContractIds, buildTopUpTx, buildWithdrawTx } from './utils/transactions'
+import { buildClaimTestTwdTx, buildTopUpTx, buildWithdrawTx, getContractIds, getTwdCoinType } from './utils/transactions'
 
 type Locale = 'en' | 'zh'
 
@@ -27,7 +27,9 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
   const [stats, setStats] = useState<LotteryStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [topUpAmount, setTopUpAmount] = useState('1')
+  const [seedVaultAmount, setSeedVaultAmount] = useState('500000')
   const [withdrawAmount, setWithdrawAmount] = useState('0.5')
+  const [grantAddress, setGrantAddress] = useState('')
   const [txStatus, setTxStatus] = useState<string | null>(null)
   const [isOwner, setIsOwner] = useState(false)
 
@@ -46,11 +48,11 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
 
       if (obj.data?.content?.dataType === 'moveObject') {
         const fields = obj.data.content.fields as any
-        const vaultMist = Number(fields.vault || '0')
+        const vaultCent = Number(fields.vault || '0')
         const newStats: LotteryStats = {
-          vault: vaultMist / 1_000_000_000,
-          totalRevenue: Number(fields.total_revenue || '0') / 1_000_000_000,
-          totalPayouts: Number(fields.total_payouts || '0') / 1_000_000_000,
+          vault: vaultCent / 100,
+          totalRevenue: Number(fields.total_revenue || '0') / 100,
+          totalPayouts: Number(fields.total_payouts || '0') / 100,
           round: Number(fields.round || '1'),
           cardCount: Number(fields.card_count || '0'),
           owner: fields.owner || '',
@@ -75,14 +77,27 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
     const ids = getContractIds()
     if (!ids.lottery || !ids.lotteryObject) return
 
-    const amountSui = parseFloat(topUpAmount)
-    if (isNaN(amountSui) || amountSui <= 0) return
+    const amountTwd = parseFloat(topUpAmount)
+    if (isNaN(amountTwd) || amountTwd <= 0 || !account?.address) return
 
     try {
       setTxStatus(locale === 'zh' ? '⏳ 正在充值...' : '⏳ Topping up...')
+      const twdCoins = await suiClient.getCoins({
+        owner: account.address,
+        coinType: getTwdCoinType(ids.lottery),
+        limit: 50,
+      })
+      const required = BigInt(Math.round(amountTwd * 100))
+      const payment = twdCoins.data.find((coin) => BigInt(coin.balance) >= required)
+      if (!payment) {
+        setTxStatus(locale === 'zh' ? '❌ 台幣餘額不足，請先領取測試台幣。' : '❌ Insufficient TWD balance.')
+        return
+      }
+
       const tx = buildTopUpTx({
         lotteryObjectId: ids.lotteryObject,
-        amount: BigInt(Math.round(amountSui * 1_000_000_000)),
+        paymentCoinObjectId: payment.coinObjectId,
+        amount: required,
         packageId: ids.lottery,
       })
       const result = await signAndExecute({ transaction: await tx.toJSON() })
@@ -98,14 +113,14 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
     const ids = getContractIds()
     if (!ids.lottery || !ids.lotteryObject) return
 
-    const amountSui = parseFloat(withdrawAmount)
-    if (isNaN(amountSui) || amountSui <= 0) return
+    const amountTwd = parseFloat(withdrawAmount)
+    if (isNaN(amountTwd) || amountTwd <= 0) return
 
     try {
       setTxStatus(locale === 'zh' ? '⏳ 正在提取...' : '⏳ Withdrawing...')
       const tx = buildWithdrawTx({
         lotteryObjectId: ids.lotteryObject,
-        amount: BigInt(Math.round(amountSui * 1_000_000_000)),
+        amount: BigInt(Math.round(amountTwd * 100)),
         packageId: ids.lottery,
       })
       const result = await signAndExecute({ transaction: await tx.toJSON() })
@@ -135,6 +150,99 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
       fetchLotteryData()
     } catch (err: any) {
       setTxStatus(locale === 'zh' ? `❌ 失敗：${err.message?.slice(0, 60)}` : `❌ Failed: ${err.message?.slice(0, 60)}`)
+    }
+  }
+
+  const handleSeedVault = async () => {
+    const ids = getContractIds()
+    if (!ids.lottery || !ids.lotteryObject || !ids.twdBankObject || !account?.address) return
+
+    const amountTwd = parseFloat(seedVaultAmount)
+    if (isNaN(amountTwd) || amountTwd <= 0) return
+
+    const amountCent = BigInt(Math.round(amountTwd * 100))
+
+    try {
+      setTxStatus(locale === 'zh' ? '⏳ 一鍵灌池中（鑄幣 -> 充值）...' : '⏳ Seeding vault (mint -> top up)...')
+
+      const mintTx = buildClaimTestTwdTx({
+        bankObjectId: ids.twdBankObject,
+        amount: amountCent,
+        recipient: account.address,
+        packageId: ids.lottery,
+      })
+      await signAndExecute({ transaction: await mintTx.toJSON() })
+
+      const twdCoins = await suiClient.getCoins({
+        owner: account.address,
+        coinType: getTwdCoinType(ids.lottery),
+        limit: 100,
+      })
+      const payment = twdCoins.data.find((coin) => BigInt(coin.balance) >= amountCent)
+      if (!payment) {
+        throw new Error('MINTED_COIN_NOT_FOUND')
+      }
+
+      const topUpTx = buildTopUpTx({
+        lotteryObjectId: ids.lotteryObject,
+        paymentCoinObjectId: payment.coinObjectId,
+        amount: amountCent,
+        packageId: ids.lottery,
+      })
+      const result = await signAndExecute({ transaction: await topUpTx.toJSON() })
+      setTxStatus(
+        locale === 'zh'
+          ? `✅ 已灌池 NT$${amountTwd.toLocaleString()}！TX: ${result.digest.slice(0, 12)}...`
+          : `✅ Vault seeded NT$${amountTwd.toLocaleString()}! TX: ${result.digest.slice(0, 12)}...`
+      )
+      fetchLotteryData()
+      onBalanceChange?.()
+    } catch (err: any) {
+      const msg = String(err?.message || '')
+      if (msg.includes('MINTED_COIN_NOT_FOUND')) {
+        setTxStatus(locale === 'zh' ? '❌ 鑄幣完成但找不到可充值的台幣 coin，請再試一次。' : '❌ Mint succeeded but no usable TWD coin was found for top-up. Retry.')
+      } else {
+        setTxStatus(locale === 'zh' ? `❌ 灌池失敗：${msg.slice(0, 90)}` : `❌ Seed failed: ${msg.slice(0, 90)}`)
+      }
+    }
+  }
+
+  const handleGrantOneTwd = async () => {
+    const ids = getContractIds()
+    if (!ids.lottery || !ids.twdBankObject) {
+      setTxStatus(locale === 'zh' ? '❌ 缺少 TWD Bank 設定，請補上 .env 參數。' : '❌ Missing TWD bank config. Please set env values.')
+      return
+    }
+
+    const recipient = grantAddress.trim()
+    const isValidAddress = /^0x[0-9a-fA-F]+$/.test(recipient)
+    if (!isValidAddress) {
+      setTxStatus(locale === 'zh' ? '❌ 玩家地址格式錯誤，請輸入 0x 開頭地址。' : '❌ Invalid player address. Please use a 0x-prefixed address.')
+      return
+    }
+
+    try {
+      setTxStatus(locale === 'zh' ? '⏳ 發送 1 台幣中...' : '⏳ Sending 1 TWD...')
+      const tx = buildClaimTestTwdTx({
+        bankObjectId: ids.twdBankObject,
+        amount: BigInt(100), // NT$1.00
+        recipient,
+        packageId: ids.lottery,
+      })
+      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      setTxStatus(
+        locale === 'zh'
+          ? `✅ 已發 1 台幣給玩家！TX: ${result.digest.slice(0, 12)}...`
+          : `✅ Sent 1 TWD to player! TX: ${result.digest.slice(0, 12)}...`
+      )
+      onBalanceChange?.()
+      setGrantAddress('')
+    } catch (err: any) {
+      setTxStatus(
+        locale === 'zh'
+          ? `❌ 發幣失敗：${err.message?.slice(0, 90)}`
+          : `❌ Send failed: ${err.message?.slice(0, 90)}`
+      )
     }
   }
 
@@ -168,20 +276,20 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
               <StatCard
                 label={locale === 'zh' ? '💰 獎金池餘額' : '💰 Vault Balance'}
-                value={`${stats.vault.toFixed(4)} SUI`}
+                value={`NT$${stats.vault.toFixed(2)}`}
                 highlight
               />
               <StatCard
                 label={locale === 'zh' ? '📈 累計營收' : '📈 Total Revenue'}
-                value={`${stats.totalRevenue.toFixed(4)} SUI`}
+                value={`NT$${stats.totalRevenue.toFixed(2)}`}
               />
               <StatCard
                 label={locale === 'zh' ? '📤 累計派獎' : '📤 Total Payouts'}
-                value={`${stats.totalPayouts.toFixed(4)} SUI`}
+                value={`NT$${stats.totalPayouts.toFixed(2)}`}
               />
               <StatCard
                 label={locale === 'zh' ? '💵 淨利潤' : '💵 Net Profit'}
-                value={`${(stats.totalRevenue - stats.totalPayouts).toFixed(4)} SUI`}
+                value={`NT$${(stats.totalRevenue - stats.totalPayouts).toFixed(2)}`}
               />
               <StatCard
                 label={locale === 'zh' ? '🎯 目前輪次' : '🎯 Current Round'}
@@ -230,9 +338,9 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
                       value={topUpAmount}
                       onChange={(e) => setTopUpAmount(e.target.value)}
                       style={{flex:1, padding:'0.7rem', borderRadius:'8px', border:'1px solid #ccc', fontSize:'1rem'}}
-                      placeholder="SUI"
+                      placeholder="TWD"
                     />
-                    <span style={{color:'#666', fontWeight:700}}>SUI</span>
+                    <span style={{color:'#666', fontWeight:700}}>TWD</span>
                     <button
                       onClick={handleTopUp}
                       disabled={isPending}
@@ -257,15 +365,74 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
                       value={withdrawAmount}
                       onChange={(e) => setWithdrawAmount(e.target.value)}
                       style={{flex:1, padding:'0.7rem', borderRadius:'8px', border:'1px solid #ccc', fontSize:'1rem'}}
-                      placeholder="SUI"
+                      placeholder="TWD"
                     />
-                    <span style={{color:'#666', fontWeight:700}}>SUI</span>
+                    <span style={{color:'#666', fontWeight:700}}>TWD</span>
                     <button
                       onClick={handleWithdraw}
                       disabled={isPending}
                       style={{background:'#d48806', color:'#fff', border:'none', padding:'0.7rem 1.5rem', borderRadius:'8px', fontWeight:800, cursor:'pointer', whiteSpace:'nowrap'}}
                     >
                       {isPending ? '⏳' : locale === 'zh' ? '提取' : 'Withdraw'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Seed Vault */}
+                <div style={{background:'#eef9f1', borderRadius:'12px', padding:'1.2rem', border:'1px solid #cfead8'}}>
+                  <h3 style={{margin:'0 0 0.8rem', fontSize:'1.1rem', color:'#1f7a3f'}}>
+                    {locale === 'zh' ? '🚀 一鍵灌獎池（大量台幣）' : '🚀 One-click Seed Vault'}
+                  </h3>
+                  <p style={{margin:'0 0 0.8rem', fontSize:'0.9rem', color:'#666'}}>
+                    {locale === 'zh'
+                      ? '會自動執行：鑄造台幣到管理錢包 -> 立即充值到獎池。'
+                      : 'Auto flow: mint TWD to admin wallet -> immediately top up vault.'}
+                  </p>
+                  <div style={{display:'flex', gap:'0.8rem', alignItems:'center'}}>
+                    <input
+                      type="number"
+                      step="1000"
+                      min="1000"
+                      value={seedVaultAmount}
+                      onChange={(e) => setSeedVaultAmount(e.target.value)}
+                      style={{flex:1, padding:'0.7rem', borderRadius:'8px', border:'1px solid #ccc', fontSize:'1rem'}}
+                      placeholder="500000"
+                    />
+                    <span style={{color:'#666', fontWeight:700}}>TWD</span>
+                    <button
+                      onClick={handleSeedVault}
+                      disabled={isPending}
+                      style={{background:'#1f7a3f', color:'#fff', border:'none', padding:'0.7rem 1.1rem', borderRadius:'8px', fontWeight:800, cursor:'pointer', whiteSpace:'nowrap'}}
+                    >
+                      {isPending ? '⏳' : locale === 'zh' ? '灌池' : 'Seed'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Send 1 TWD (Test USDC) */}
+                <div style={{background:'#f4f8ff', borderRadius:'12px', padding:'1.2rem', border:'1px solid #d6e4ff'}}>
+                  <h3 style={{margin:'0 0 0.8rem', fontSize:'1.1rem', color:'#1d39c4'}}>
+                    {locale === 'zh' ? '💸 發 1 台幣給玩家' : '💸 Send 1 TWD to Player'}
+                  </h3>
+                  <p style={{margin:'0 0 0.8rem', fontSize:'0.9rem', color:'#666'}}>
+                    {locale === 'zh'
+                      ? '使用 onchain_invoice USDC faucet 發送 1 單位測試幣到玩家地址。'
+                      : 'Use onchain_invoice USDC faucet to send 1 unit of test token to a player address.'}
+                  </p>
+                  <div style={{display:'flex', gap:'0.8rem', alignItems:'center'}}>
+                    <input
+                      type="text"
+                      value={grantAddress}
+                      onChange={(e) => setGrantAddress(e.target.value)}
+                      style={{flex:1, padding:'0.7rem', borderRadius:'8px', border:'1px solid #ccc', fontSize:'0.92rem'}}
+                      placeholder={locale === 'zh' ? '輸入玩家地址 (0x...)' : 'Enter player address (0x...)'}
+                    />
+                    <button
+                      onClick={handleGrantOneTwd}
+                      disabled={isPending}
+                      style={{background:'#1d39c4', color:'#fff', border:'none', padding:'0.7rem 1.1rem', borderRadius:'8px', fontWeight:800, cursor:'pointer', whiteSpace:'nowrap'}}
+                    >
+                      {isPending ? '⏳' : locale === 'zh' ? '發 1 台幣' : 'Send 1 TWD'}
                     </button>
                   </div>
                 </div>
