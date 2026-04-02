@@ -8,8 +8,22 @@ import App from './App.tsx'
 
 const queryClient = new QueryClient()
 
-const selectedNetwork = import.meta.env.VITE_SUI_NETWORK ?? 'testnet'
-const fullnodeUrl = import.meta.env.VITE_SUI_FULLNODE_URL ?? 'https://fullnode.testnet.sui.io:443'
+function normalizeSuiChainId(raw?: string): 'sui:testnet' | 'sui:mainnet' | 'sui:devnet' | 'sui:localnet' {
+  const cleaned = (raw ?? 'testnet').trim().toLowerCase()
+
+  if (cleaned === 'sui:testnet' || cleaned === 'sui:mainnet' || cleaned === 'sui:devnet' || cleaned === 'sui:localnet') {
+    return cleaned
+  }
+
+  if (cleaned === 'testnet' || cleaned === 'mainnet' || cleaned === 'devnet' || cleaned === 'localnet') {
+    return `sui:${cleaned}` as 'sui:testnet' | 'sui:mainnet' | 'sui:devnet' | 'sui:localnet'
+  }
+
+  return 'sui:testnet'
+}
+
+const selectedNetwork = normalizeSuiChainId(import.meta.env.VITE_SUI_NETWORK)
+const fullnodeUrl = (import.meta.env.VITE_SUI_FULLNODE_URL ?? 'https://fullnode.testnet.sui.io:443').trim()
 
 const networks = {
   [selectedNetwork]: { url: fullnodeUrl },
