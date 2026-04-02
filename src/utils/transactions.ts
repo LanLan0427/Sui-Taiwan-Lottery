@@ -49,6 +49,22 @@ export function getTwdCoinType(packageId: string): string {
   return `${packageId}::scratch::SCRATCH`;
 }
 
+export type SuiChainId = 'sui:testnet' | 'sui:mainnet' | 'sui:devnet' | 'sui:localnet';
+
+export function getSuiChainId(): SuiChainId {
+  const cleaned = (import.meta.env.VITE_SUI_NETWORK ?? 'testnet').trim().toLowerCase();
+
+  if (cleaned === 'sui:testnet' || cleaned === 'sui:mainnet' || cleaned === 'sui:devnet' || cleaned === 'sui:localnet') {
+    return cleaned;
+  }
+
+  if (cleaned === 'testnet' || cleaned === 'mainnet' || cleaned === 'devnet' || cleaned === 'localnet') {
+    return `sui:${cleaned}` as SuiChainId;
+  }
+
+  return 'sui:testnet';
+}
+
 /**
  * 將 TicketId 轉為鏈上 tier 數字
  */

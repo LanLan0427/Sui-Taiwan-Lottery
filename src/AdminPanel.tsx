@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
-import { buildClaimTestTwdTx, buildTopUpTx, buildWithdrawTx, getContractIds, getTwdCoinType } from './utils/transactions'
+import { buildClaimTestTwdTx, buildTopUpTx, buildWithdrawTx, getContractIds, getSuiChainId, getTwdCoinType } from './utils/transactions'
 
 type Locale = 'en' | 'zh'
 
@@ -32,6 +32,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
   const [grantAddress, setGrantAddress] = useState('')
   const [txStatus, setTxStatus] = useState<string | null>(null)
   const [isOwner, setIsOwner] = useState(false)
+  const chainId = getSuiChainId()
 
   const fetchLotteryData = useCallback(async () => {
     const ids = getContractIds()
@@ -100,7 +101,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
         amount: required,
         packageId: ids.lottery,
       })
-      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
       setTxStatus(locale === 'zh' ? `✅ 充值成功！TX: ${result.digest.slice(0, 12)}...` : `✅ Top-up success! TX: ${result.digest.slice(0, 12)}...`)
       fetchLotteryData()
       onBalanceChange?.()
@@ -123,7 +124,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
         amount: BigInt(Math.round(amountTwd * 100)),
         packageId: ids.lottery,
       })
-      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
       setTxStatus(locale === 'zh' ? `✅ 提取成功！TX: ${result.digest.slice(0, 12)}...` : `✅ Withdraw success! TX: ${result.digest.slice(0, 12)}...`)
       fetchLotteryData()
       onBalanceChange?.()
@@ -145,7 +146,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
         target: `${ids.lottery}::scratch::new_round`,
         arguments: [tx.object(ids.lotteryObject)],
       })
-      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
       setTxStatus(locale === 'zh' ? `✅ 輪次已更新！TX: ${result.digest.slice(0, 12)}...` : `✅ Round advanced! TX: ${result.digest.slice(0, 12)}...`)
       fetchLotteryData()
     } catch (err: any) {
@@ -171,7 +172,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
         recipient: account.address,
         packageId: ids.lottery,
       })
-      await signAndExecute({ transaction: await mintTx.toJSON() })
+      await signAndExecute({ transaction: await mintTx.toJSON(), chain: chainId })
 
       const twdCoins = await suiClient.getCoins({
         owner: account.address,
@@ -189,7 +190,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
         amount: amountCent,
         packageId: ids.lottery,
       })
-      const result = await signAndExecute({ transaction: await topUpTx.toJSON() })
+      const result = await signAndExecute({ transaction: await topUpTx.toJSON(), chain: chainId })
       setTxStatus(
         locale === 'zh'
           ? `✅ 已灌池 NT$${amountTwd.toLocaleString()}！TX: ${result.digest.slice(0, 12)}...`
@@ -229,7 +230,7 @@ export function AdminPanel({ locale, onClose, onBalanceChange }: AdminPanelProps
         recipient,
         packageId: ids.lottery,
       })
-      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
       setTxStatus(
         locale === 'zh'
           ? `✅ 已發 1 台幣給玩家！TX: ${result.digest.slice(0, 12)}...`

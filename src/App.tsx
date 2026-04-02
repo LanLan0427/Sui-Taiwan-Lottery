@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
 import './App.css'
-import { getContractIds, buildBuyScratchCardTx, buildClaimTestTwdTx, buildSettleScratchTx, getTwdCoinType, ticketIdToTier } from './utils/transactions'
+import { getContractIds, buildBuyScratchCardTx, buildClaimTestTwdTx, buildSettleScratchTx, getSuiChainId, getTwdCoinType, ticketIdToTier } from './utils/transactions'
 import { AnimatedNumber } from './AnimatedNumber'
 import { playCoinSound, playScratchSound, playWinSound } from './utils/audio'
 import { AdminPanel } from './AdminPanel'
@@ -371,6 +371,7 @@ function App() {
 
   const t = content[locale]
   const activeTicket = ticketTypes.find((item) => item.id === selectedTicket) ?? ticketTypes[1]
+  const chainId = getSuiChainId()
   const normalizeAddress = (value?: string | null) => value?.trim().toLowerCase() ?? null
 
   // 查詢錢包餘額
@@ -520,7 +521,7 @@ function App() {
         recipient: account.address,
         packageId: ids.lottery as string,
       })
-      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
       window.alert(
         locale === 'zh'
           ? `✅ 已領取 1000 台幣！TX: ${result.digest.slice(0, 12)}...`
@@ -795,7 +796,7 @@ function App() {
         packageId: ids.lottery,
       })
 
-      const result = await signAndExecute({ transaction: await tx.toJSON() })
+      const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
       console.log('✅ buy_scratch_card TX digest:', result.digest)
 
       // 等待交易確認並擷取新建的 ScratchCard object ID
@@ -876,7 +877,7 @@ function App() {
             packageId: ids.lottery,
           })
 
-          const result = await signAndExecute({ transaction: await tx.toJSON() })
+          const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
           console.log('✅ settle_scratch TX digest:', result.digest)
           refreshBalance()
         } catch (err: any) {
