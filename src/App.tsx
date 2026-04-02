@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
 import './App.css'
-import { getContractIds, buildBuyScratchCardTx, buildClaimTestTwdTx, buildSettleScratchTx, getSuiChainId, getTwdCoinType, ticketIdToTier } from './utils/transactions'
+import { buildOneStopInvoiceTx, getContractIds, buildBuyScratchCardTx, buildClaimTestTwdTx, buildSettleScratchTx, getSuiChainId, getTwdCoinType, ticketIdToTier } from './utils/transactions'
 import { AnimatedNumber } from './AnimatedNumber'
 import { playCoinSound, playScratchSound, playWinSound } from './utils/audio'
 import { AdminPanel } from './AdminPanel'
@@ -848,6 +848,41 @@ function App() {
       playCoinSound()
       setIsModalOpen(true)
       refreshBalance()
+
+      // Best-effort bonus flow for hackathon scoring:
+      // faucet USDC -> buy quota -> init invoice via official onchain_invoice package.
+      const hasInvoiceConfig = Boolean(
+        ids.invoicePackage &&
+        ids.invoiceSystem &&
+        ids.invoiceTreasury &&
+        ids.invoiceUsdcTreasuryCap &&
+        ids.invoiceTaxTreasuryCap &&
+        account.address
+      )
+
+      if (hasInvoiceConfig) {
+        try {
+          const invoiceTx = buildOneStopInvoiceTx({
+            usdcTreasuryCapId: ids.invoiceUsdcTreasuryCap as string,
+            taxTreasuryCapId: ids.invoiceTaxTreasuryCap as string,
+            treasuryId: ids.invoiceTreasury as string,
+            systemId: ids.invoiceSystem as string,
+            recipient: account.address,
+            usdcAmount: BigInt(100),
+            protocol: 'Sui-Taiwan-Lottery',
+            packageId: ids.invoicePackage as string,
+          })
+
+          const invoiceResult = await signAndExecute({
+            transaction: await invoiceTx.toJSON(),
+            chain: chainId,
+          })
+          console.log('✅ onchain_invoice bonus TX digest:', invoiceResult.digest)
+        } catch (invoiceErr) {
+          // Keep gameplay non-blocking if bonus flow fails.
+          console.warn('⚠️ onchain_invoice bonus flow failed:', invoiceErr)
+        }
+      }
     } catch (err) {
       console.error('❌ buy_scratch_card failed:', err)
     }
