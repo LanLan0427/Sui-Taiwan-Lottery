@@ -465,9 +465,27 @@ function App() {
         : 'Cannot reach node/service. Please check your network and try again later.'
     }
 
+    if (message.includes('gas') || message.includes('insufficient') || message.includes('no valid gas')) {
+      return locale === 'zh'
+        ? '發放交易需要 SUI gas。請先點「領 SUI 測試幣」再重試。'
+        : 'This funding transaction needs SUI gas. Click "Get SUI Gas" and retry.'
+    }
+
+    if (message.includes('object') && (message.includes('not found') || message.includes('does not exist'))) {
+      return locale === 'zh'
+        ? '找不到鏈上物件，請確認 VITE_LOTTERY_PACKAGE_ID / VITE_TWD_BANK_OBJECT_ID 與 testnet 一致。'
+        : 'On-chain object not found. Verify VITE_LOTTERY_PACKAGE_ID / VITE_TWD_BANK_OBJECT_ID on testnet.'
+    }
+
+    if (message.includes('module') && message.includes('not found')) {
+      return locale === 'zh'
+        ? '合約模組不存在，請確認目前前端環境變數是否對應最新 publish 的 package。'
+        : 'Contract module was not found. Ensure frontend env points to the latest published package.'
+    }
+
     return locale === 'zh'
-      ? '發放失敗，請確認 onchain_invoice 參數是否完整。'
-      : 'Funding failed. Please verify onchain_invoice environment values.'
+      ? `發放失敗：${raw || '未知錯誤'}。請確認錢包在 testnet、且有 SUI gas。`
+      : `Funding failed: ${raw || 'Unknown error'}. Ensure wallet is on testnet with SUI gas.`
   }, [locale])
 
   const requestTestnetSui = useCallback(async () => {
