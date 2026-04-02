@@ -38,3 +38,4 @@ contracts/lottery_republish_twd/
 
 .sui_tx*.json
 contracts/onchain_invoice_repo/
+.vercel
