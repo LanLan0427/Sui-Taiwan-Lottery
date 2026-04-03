@@ -29,6 +29,7 @@ const content = {
     ticketPrice: 'Ticket price (NTD ref)',
     connectedButton: 'Buy & Generate Scratch Card',
     disconnectedButton: 'Connect Wallet to Buy',
+    connectToPlayHint: 'Connect wallet first to unlock gameplay.',
     ticketsOwned: 'Cards purchased',
     selectTicket: 'Ticket Type',
     scratchBoard: 'Scratch Board',
@@ -96,6 +97,7 @@ const content = {
     ticketPrice: '票價（台彩參考）',
     connectedButton: '購買並產生刮卡',
     disconnectedButton: '請先連接錢包',
+    connectToPlayHint: '請先連接錢包後再開始遊玩。',
     ticketsOwned: '已購買張數',
     selectTicket: '票種',
     scratchBoard: '刮卡區',
@@ -1069,6 +1071,14 @@ function App() {
         </section>
       )}
 
+      {!account && (
+        <section style={{marginBottom: '0.8rem'}}>
+          <div style={{maxWidth: '1200px', margin: '0 auto', padding: '0.8rem 1rem', borderRadius: '10px', background: '#fff8e8', border: '1px solid #f1d27b', color: '#8a6d1d', fontSize: '0.92rem', fontWeight: 700}}>
+            {t.connectToPlayHint}
+          </div>
+        </section>
+      )}
+
       <section className="market-section">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom: '1.5rem', marginTop: '1rem'}}>
           <h2 style={{fontSize: '2rem', margin: 0, color: '#333'}}>{t.buyTickets}</h2>
@@ -1086,20 +1096,21 @@ function App() {
               placeholder={t.searchPlaceholder}
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
+              disabled={!account}
             />
-            <button className="search-btn">🔍</button>
+            <button className="search-btn" disabled={!account}>🔍</button>
           </div>
           <div className="filter-pills">
-            <button className={priceFilter === 'all' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('all')}>
+            <button className={priceFilter === 'all' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('all')} disabled={!account}>
               {locale === 'zh' ? '全部' : 'All'}
             </button>
-            <button className={priceFilter === '200' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('200')}>
+            <button className={priceFilter === '200' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('200')} disabled={!account}>
               NT$200
             </button>
-            <button className={priceFilter === '500' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('500')}>
+            <button className={priceFilter === '500' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('500')} disabled={!account}>
               NT$500
             </button>
-            <button className={priceFilter === '2000' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('2000')}>
+            <button className={priceFilter === '2000' ? 'pill active' : 'pill'} onClick={() => setPriceFilter('2000')} disabled={!account}>
               NT$2000
             </button>
           </div>
@@ -1111,7 +1122,7 @@ function App() {
               key={item.id}
               className={selectedTicket === item.id ? 'ticket-card active' : 'ticket-card'}
             >
-              <div className="ticket-art" onClick={() => setSelectedTicket(item.id)}>
+              <div className="ticket-art" onClick={() => { if (account) setSelectedTicket(item.id) }} style={{cursor: account ? 'pointer' : 'not-allowed', opacity: account ? 1 : 0.75}}>
                 <span className="ticket-art-title">{item.title[locale]}</span>
                 <span className="ticket-art-rule">{getGameRule(item.gameType)}</span>
               </div>
@@ -1136,7 +1147,11 @@ function App() {
                   onClick={(e) => { e.stopPropagation(); buyScratchCard(item); }}
                   disabled={isExecuting || isModalOpen || !account}
                 >
-                  {isExecuting ? '⏳ Processing...' : `💳 ${locale === 'zh' ? '購買' : 'Buy'} (NT$${item.priceNtd})`}
+                  {!account
+                    ? t.disconnectedButton
+                    : isExecuting
+                      ? '⏳ Processing...'
+                      : `💳 ${locale === 'zh' ? '購買' : 'Buy'} (NT$${item.priceNtd})`}
                 </button>
               </div>
             </div>
