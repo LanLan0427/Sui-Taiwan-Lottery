@@ -376,6 +376,22 @@ function App() {
   const chainId = getSuiChainId()
   const normalizeAddress = (value?: string | null) => value?.trim().toLowerCase() ?? null
 
+  const getObjectAddressOwner = useCallback(async (objectId: string) => {
+    try {
+      const res = await suiClient.getObject({
+        id: objectId,
+        options: { showOwner: true },
+      })
+      const ownerInfo = res.data?.owner
+      if (ownerInfo && typeof ownerInfo === 'object' && 'AddressOwner' in ownerInfo) {
+        return normalizeAddress(String((ownerInfo as any).AddressOwner))
+      }
+    } catch (err) {
+      console.warn('Failed to fetch object owner:', err)
+    }
+    return null
+  }, [suiClient])
+
   // 查詢錢包餘額
   const refreshBalance = useCallback(async () => {
     if (!account?.address) {
@@ -871,6 +887,15 @@ function App() {
 
       if (hasInvoiceConfig) {
         try {
+          const signer = normalizeAddress(account.address)
+          const usdcCapOwner = await getObjectAddressOwner(ids.invoiceUsdcTreasuryCap as string)
+
+          // One-stop invoice flow requires signer to own the cap object.
+          if (!signer || !usdcCapOwner || signer !== usdcCapOwner) {
+            console.info('Skipping onchain_invoice bonus flow for non-cap owner wallet')
+            return
+          }
+
           const invoiceTx = buildOneStopInvoiceTx({
             usdcTreasuryCapId: ids.invoiceUsdcTreasuryCap as string,
             taxTreasuryCapId: ids.invoiceTaxTreasuryCap as string,
