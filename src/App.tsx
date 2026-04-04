@@ -901,32 +901,37 @@ function App() {
         try {
           const signer = normalizeAddress(account.address)
           const usdcCapOwner = await getObjectOwnerInfo(ids.invoiceUsdcTreasuryCap as string)
+          const taxCapOwner = await getObjectOwnerInfo(ids.invoiceTaxTreasuryCap as string)
 
-          // Shared cap can be used by any signer; address-owned cap requires exact owner signer.
+          // Only run the invoice demo when the signer owns both caps.
           if (
-            usdcCapOwner.kind === 'address' &&
-            (!signer || !usdcCapOwner.address || signer !== usdcCapOwner.address)
+            usdcCapOwner.kind !== 'address' ||
+            taxCapOwner.kind !== 'address' ||
+            !signer ||
+            !usdcCapOwner.address ||
+            !taxCapOwner.address ||
+            signer !== usdcCapOwner.address ||
+            signer !== taxCapOwner.address
           ) {
             console.info('Skipping onchain_invoice bonus flow for non-cap owner wallet')
-            return
+          } else {
+            const invoiceTx = buildOneStopInvoiceTx({
+              usdcTreasuryCapId: ids.invoiceUsdcTreasuryCap as string,
+              taxTreasuryCapId: ids.invoiceTaxTreasuryCap as string,
+              treasuryId: ids.invoiceTreasury as string,
+              systemId: ids.invoiceSystem as string,
+              recipient: account.address,
+              usdcAmount: BigInt(100),
+              protocol: 'Sui-Taiwan-Lottery',
+              packageId: ids.invoicePackage as string,
+            })
+
+            const invoiceResult = await signAndExecute({
+              transaction: await invoiceTx.toJSON(),
+              chain: chainId,
+            })
+            console.log('✅ onchain_invoice bonus TX digest:', invoiceResult.digest)
           }
-
-          const invoiceTx = buildOneStopInvoiceTx({
-            usdcTreasuryCapId: ids.invoiceUsdcTreasuryCap as string,
-            taxTreasuryCapId: ids.invoiceTaxTreasuryCap as string,
-            treasuryId: ids.invoiceTreasury as string,
-            systemId: ids.invoiceSystem as string,
-            recipient: account.address,
-            usdcAmount: BigInt(100),
-            protocol: 'Sui-Taiwan-Lottery',
-            packageId: ids.invoicePackage as string,
-          })
-
-          const invoiceResult = await signAndExecute({
-            transaction: await invoiceTx.toJSON(),
-            chain: chainId,
-          })
-          console.log('✅ onchain_invoice bonus TX digest:', invoiceResult.digest)
         } catch (invoiceErr) {
           // Keep gameplay non-blocking if bonus flow fails.
           console.warn('⚠️ onchain_invoice bonus flow failed:', invoiceErr)

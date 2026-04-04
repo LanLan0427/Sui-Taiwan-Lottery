@@ -48,6 +48,9 @@ https://sui-taiwan-lottery-review.vercel.app
 - onchain_invoice::tax_coin::buy_quota
 - onchain_invoice::invoice::init_invoice
 
+註：如果評審使用的是一般玩家錢包，這段加分交易會自動跳過，不影響主遊戲。
+若要實際看到它成功，請用 owner 錢包示範一次。
+
 3. 若中獎再看
 - scratch::settle_scratch
 
@@ -81,6 +84,7 @@ https://sui-taiwan-lottery-review.vercel.app
 3. 發票流程失敗
 - 不阻斷主遊戲
 - 可先完成主遊戲交易，再補查 one-stop 發票交易
+- 一般玩家錢包會自動跳過 owner-only 的 bonus demo，這是預期行為
 
 ## 評審快速結論模板
 
