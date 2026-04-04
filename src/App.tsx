@@ -411,6 +411,16 @@ function App() {
     }
   }, [account?.address, suiClient])
 
+  const refreshBalanceBurst = useCallback(() => {
+    refreshBalance()
+    const followUpMs = [700, 1600, 3200]
+    followUpMs.forEach((ms) => {
+      window.setTimeout(() => {
+        refreshBalance()
+      }, ms)
+    })
+  }, [refreshBalance])
+
   const getFaucetErrorMessage = useCallback((raw: string) => {
     const message = raw.toLowerCase()
 
@@ -529,10 +539,7 @@ function App() {
           ? `✅ 已領取 1000 台幣！TX: ${result.digest.slice(0, 12)}...`
           : `✅ 1000 TWD test token granted! TX: ${result.digest.slice(0, 12)}...`
       )
-
-      setTimeout(() => {
-        refreshBalance()
-      }, 2500)
+      refreshBalanceBurst()
     } catch (error: any) {
       console.error('Failed to request faucet:', error)
       const nextError = getFaucetErrorMessage(String(error?.message || ''))
@@ -541,7 +548,7 @@ function App() {
     } finally {
       setIsFaucetLoading(false)
     }
-  }, [account?.address, getFaucetErrorMessage, locale, refreshBalance])
+  }, [account?.address, chainId, getFaucetErrorMessage, locale, refreshBalanceBurst])
 
   const getTwdCoinObjectIdForAmount = useCallback(async (amountCent: number) => {
     const ids = getContractIds()
@@ -916,7 +923,7 @@ function App() {
 
           const result = await signAndExecute({ transaction: await tx.toJSON(), chain: chainId })
           console.log('✅ settle_scratch TX digest:', result.digest)
-          refreshBalance()
+          refreshBalanceBurst()
         } catch (err: any) {
           console.error('❌ settle_scratch failed:', err)
           const msg = String(err?.message || '')
