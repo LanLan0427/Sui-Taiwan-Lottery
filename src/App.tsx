@@ -376,7 +376,7 @@ function App() {
   const chainId = getSuiChainId()
   const normalizeAddress = (value?: string | null) => value?.trim().toLowerCase() ?? null
 
-  const getObjectAddressOwner = useCallback(async (objectId: string) => {
+  const getObjectOwnerInfo = useCallback(async (objectId: string) => {
     try {
       const res = await suiClient.getObject({
         id: objectId,
@@ -384,12 +384,24 @@ function App() {
       })
       const ownerInfo = res.data?.owner
       if (ownerInfo && typeof ownerInfo === 'object' && 'AddressOwner' in ownerInfo) {
-        return normalizeAddress(String((ownerInfo as any).AddressOwner))
+        return {
+          kind: 'address' as const,
+          address: normalizeAddress(String((ownerInfo as any).AddressOwner)),
+        }
+      }
+      if (ownerInfo && typeof ownerInfo === 'object' && 'Shared' in ownerInfo) {
+        return {
+          kind: 'shared' as const,
+          address: null,
+        }
       }
     } catch (err) {
       console.warn('Failed to fetch object owner:', err)
     }
-    return null
+    return {
+      kind: 'unknown' as const,
+      address: null,
+    }
   }, [suiClient])
 
   // 查詢錢包餘額
@@ -888,10 +900,13 @@ function App() {
       if (hasInvoiceConfig) {
         try {
           const signer = normalizeAddress(account.address)
-          const usdcCapOwner = await getObjectAddressOwner(ids.invoiceUsdcTreasuryCap as string)
+          const usdcCapOwner = await getObjectOwnerInfo(ids.invoiceUsdcTreasuryCap as string)
 
-          // One-stop invoice flow requires signer to own the cap object.
-          if (!signer || !usdcCapOwner || signer !== usdcCapOwner) {
+          // Shared cap can be used by any signer; address-owned cap requires exact owner signer.
+          if (
+            usdcCapOwner.kind === 'address' &&
+            (!signer || !usdcCapOwner.address || signer !== usdcCapOwner.address)
+          ) {
             console.info('Skipping onchain_invoice bonus flow for non-cap owner wallet')
             return
           }
